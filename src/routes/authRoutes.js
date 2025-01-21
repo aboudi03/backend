@@ -1,9 +1,9 @@
-const express = require('express');
-const { signIn } = require('../Controllers/authController'); // Import the sign-in controller
+const express = require("express");
+const { login } = require("../Controllers/authController");
 
 const router = express.Router();
 
-// Route for sign-in
-router.post('/signin', signIn);
+// Define the login route
+router.post("/login", login);
 
 module.exports = router;

@@ -1,54 +1,55 @@
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const db = require('../db/db');
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const db = require("../db/db");
 
-exports.signIn = async (req, res) => {
+const login = async (req, res) => {
   const { email, password } = req.body;
 
-  // Validate input
+  // Validate email and password presence
   if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
+    return res.status(400).json({ message: "Email and password are required." });
   }
 
   try {
-    // Fetch the user from the database
-    const query = 'SELECT * FROM users WHERE email = ?';
-    const [result] = await db.promise().query(query, [email]);
+    // Query for the user in the database by email
+    const [rows] = await db.promise().query("SELECT * FROM users WHERE email = ?", [email]);
 
-    if (result.length === 0) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+    // If no user found, return generic error message
+    if (rows.length === 0) {
+      return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const user = result[0];
+    const user = rows[0];
 
     // Compare the provided password with the stored hashed password
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-
-    if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatch) {
+      return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    // Generate a JWT token
+    // Generate a JWT token for the authenticated user
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      process.env.JWT_SECRET || 'your_jwt_secret_key', // Use a secure key in your .env
-      { expiresIn: '1h' } // Token expiry time
+      { id: user.id, email: user.email, userType: user.user_type },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
     );
 
-    // Respond with the token and user details
-    return res.status(200).json({
-      message: 'Sign-in successful!',
+    // Send a successful response with the token and user details
+    res.status(200).json({
+      message: "Login successful",
       token,
       user: {
         id: user.id,
         email: user.email,
+        userType: user.user_type,
         firstName: user.first_name,
         lastName: user.last_name,
-        userType: user.user_type,
       },
     });
   } catch (error) {
-    console.error('Error during sign-in:', error.message);
-    return res.status(500).json({ message: 'Server error. Please try again.' });
+    console.error("Error during login:", error.message);
+    res.status(500).json({ message: "An error occurred during login." });
   }
 };
+
+module.exports = { login };
