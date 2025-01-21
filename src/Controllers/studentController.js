@@ -3,11 +3,12 @@ const db = require('../db/db');
 
 const registerStudent = async (req, res) => {
   console.log("Incoming request body:", req.body);
+
   const {
     firstName,
     lastName,
     email,
-    phone,
+    phoneNumber, // Ensure this matches the frontend payload
     password,
     educationLevel,
     school,
@@ -15,22 +16,21 @@ const registerStudent = async (req, res) => {
     goals,
   } = req.body;
 
-  console.log('Incoming request body:', req.body);
-
-  // 1. Validate all required fields (including password)
+  // 1. Validate all required fields
   if (
     !firstName ||
     !lastName ||
     !email ||
-    !phone ||
+    !phoneNumber ||
     !password ||
     !educationLevel ||
     !school ||
-    !subjects ||
+    !Array.isArray(subjects) || // Ensure subjects is an array
+    subjects.length === 0 ||
     !goals
   ) {
-    console.error('Missing required fields');
-    return res.status(400).send('All required fields must be provided.');
+    console.error("Validation failed: Missing or invalid fields");
+    return res.status(400).json({ message: "All required fields must be provided." });
   }
 
   try {
@@ -46,13 +46,13 @@ const registerStudent = async (req, res) => {
       firstName,
       lastName,
       email,
-      phone,
+      phoneNumber,
       hashedPassword,
     ]);
 
     // 4. Retrieve the new user ID
     const userId = userResult.insertId;
-    console.log('User inserted with ID:', userId);
+    console.log("User inserted with ID:", userId);
 
     // 5. Insert student-specific data into `students` table
     const studentSql = `
@@ -63,15 +63,20 @@ const registerStudent = async (req, res) => {
       userId,
       educationLevel,
       school,
-      JSON.stringify(subjects), // store array as JSON
+      JSON.stringify(subjects), // Store array as JSON
       goals,
     ]);
 
-    console.log('Student inserted successfully');
-    res.status(201).send('Student registered successfully!');
+    console.log("Student inserted successfully");
+    res.status(201).json({ message: "Student registered successfully!" });
   } catch (error) {
-    console.error('Error:', error.sqlMessage || error.message);
-    res.status(500).send('An error occurred during registration.');
+    console.error("Error during registration:", error.sqlMessage || error.message);
+
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(400).json({ message: "Email or phone number already exists." });
+    }
+
+    res.status(500).json({ message: "An error occurred during registration." });
   }
 };
 

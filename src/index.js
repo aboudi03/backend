@@ -4,6 +4,8 @@ const bodyParser = require('body-parser');
 const studentRoutes = require('./routes/studentRoutes');
 const tutorRoutes = require('./routes/tutorRoutes');
 const authRoutes = require('./routes/authRoutes'); 
+require('dotenv').config();
+
 
 const app = express();
 const PORT = process.env.PORT || 5003;
