@@ -2,11 +2,12 @@ const bcrypt = require('bcrypt');
 const db = require('../db/db');
 
 const registerStudent = async (req, res) => {
+  console.log("Incoming request body:", req.body);
   const {
     firstName,
     lastName,
     email,
-    phoneNumber,
+    phone,
     password,
     educationLevel,
     school,
@@ -21,7 +22,7 @@ const registerStudent = async (req, res) => {
     !firstName ||
     !lastName ||
     !email ||
-    !phoneNumber ||
+    !phone ||
     !password ||
     !educationLevel ||
     !school ||
@@ -45,7 +46,7 @@ const registerStudent = async (req, res) => {
       firstName,
       lastName,
       email,
-      phoneNumber,
+      phone,
       hashedPassword,
     ]);
 

@@ -1,10 +1,9 @@
-require('dotenv').config(); // Load environment variables
-
 const express = require('express');
-const cors = require('cors'); // Import CORS middleware
+const cors = require('cors'); // If using CORS for frontend-backend communication
 const bodyParser = require('body-parser');
 const studentRoutes = require('./routes/studentRoutes');
-const authRoutes = require("./routes/authRoutes");
+const tutorRoutes = require('./routes/tutorRoutes');
+const authRoutes = require('./routes/authRoutes'); 
 
 const app = express();
 const PORT = process.env.PORT || 5003;
@@ -24,8 +23,15 @@ app.use(bodyParser.json());
 // Routes
 app.use('/api/auth', authRoutes); // Authentication routes
 app.use('/api', studentRoutes);   // Student-related routes
+// Middleware
+app.use(cors()); // Adjust origin as needed
+app.use(bodyParser.json());
 
-// Default route for the root URL
+// Register routes
+app.use('/api', studentRoutes);
+app.use('/api', tutorRoutes); 
+
+// Default route
 app.get('/', (req, res) => {
     res.send('StudyBuddy API is running.');
 });
@@ -35,13 +41,7 @@ app.use((req, res) => {
     res.status(404).json({ message: "Route not found" });
 });
 
-// Error-handling middleware
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).send('Something went wrong!');
-});
-
-// Start the server
+// Start server
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });

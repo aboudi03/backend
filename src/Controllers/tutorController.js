@@ -1,84 +1,80 @@
 const bcrypt = require('bcrypt');
-const db = require('../db/db');
+const db = require('../db/db'); // Ensure this path is correct
 
 const registerTutor = async (req, res) => {
-  const {
-    firstName,
-    lastName,
-    email,
-    phoneNumber,
-    password,
-    education,
-    certifications,
-    experience,
-    subjects,
-    otherSubjects,
-    availability,
-  } = req.body;
+    const {
+        firstName,
+        lastName,
+        email,
+        phone,
+        password,
+        education,
+        certifications,
+        experience,
+        subjects,
+        otherSubjects,
+        availability,
+    } = req.body;
 
-  console.log('Incoming request body:', req.body);
+    console.log('Incoming request body:', req.body);
 
-  // 1. Validate all required fields (including password and tutor-specific fields)
-  if (
-    !firstName ||
-    !lastName ||
-    !email ||
-    !phoneNumber ||
-    !password ||
-    !education ||
-    !experience ||
-    !subjects ||
-    !availability ||
-    !availability.days ||
-    !availability.startTime ||
-    !availability.endTime
-  ) {
-    console.error('Missing required fields');
-    return res.status(400).send('All required fields must be provided.');
-  }
+    if (
+      !firstName ||
+      !lastName ||
+      !email ||
+      !phone ||
+      !password || // Ensure password is included
+      !education ||
+      !experience ||
+      !Array.isArray(subjects) ||
+      subjects.length === 0 ||
+      !availability ||
+      !availability.days ||
+      !availability.startTime ||
+      !availability.endTime
+    ) {
+      console.error("Validation failed. Request body:", req.body); // Log the failing request
+      return res.status(400).json({ message: "All required fields must be provided." });
+    }
+    
 
-  try {
-    // 2. Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 3. Insert user data into `users` table
-    const userSql = `
-      INSERT INTO users (first_name, last_name, email, phone_number, password_hash, user_type)
-      VALUES (?, ?, ?, ?, ?, 'tutor')
-    `;
-    const [userResult] = await db.promise().query(userSql, [
-      firstName,
-      lastName,
-      email,
-      phoneNumber,
-      hashedPassword,
-    ]);
+        const userSql = `
+            INSERT INTO users (first_name, last_name, email, phone_number, password_hash, user_type)
+            VALUES (?, ?, ?, ?, ?, 'tutor')
+        `;
+        const [userResult] = await db.promise().query(userSql, [
+            firstName,
+            lastName,
+            email,
+            phone,
+            hashedPassword,
+        ]);
 
-    // 4. Retrieve the new user ID
-    const userId = userResult.insertId;
-    console.log('User inserted with ID:', userId);
+        const userId = userResult.insertId;
+        console.log('User inserted with ID:', userId);
 
-    // 5. Insert tutor-specific data into `tutors` table
-    const tutorSql = `
-      INSERT INTO tutors (user_id, education, certifications, experience, subjects, other_subjects, availability)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `;
-    await db.promise().query(tutorSql, [
-      userId,
-      education,
-      certifications || null, // optional field
-      experience,
-      JSON.stringify(subjects), // store array as JSON
-      otherSubjects || null, // optional field
-      JSON.stringify(availability), // store availability as JSON
-    ]);
+        const tutorSql = `
+            INSERT INTO tutors (user_id, education, certifications, experience, subjects, other_subjects, availability)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
+        await db.promise().query(tutorSql, [
+            userId,
+            education,
+            certifications,
+            experience,
+            JSON.stringify(subjects),
+            otherSubjects,
+            JSON.stringify(availability),
+        ]);
 
-    console.log('Tutor inserted successfully');
-    res.status(201).send('Tutor registered successfully!');
-  } catch (error) {
-    console.error('Error:', error.sqlMessage || error.message);
-    res.status(500).send('An error occurred during registration.');
-  }
+        res.status(201).json({ message: 'Tutor registered successfully!', userId, userType: 'tutor' });
+    } catch (error) {
+        console.error('Error during tutor registration:', error.sqlMessage || error.message);
+        res.status(500).json({ message: 'An error occurred during tutor registration.' });
+    }
 };
 
 module.exports = { registerTutor };
