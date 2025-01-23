@@ -1,11 +1,12 @@
 const express = require('express');
-const cors = require('cors'); // If using CORS for frontend-backend communication
+const cors = require('cors'); 
 const bodyParser = require('body-parser');
 const studentRoutes = require('./routes/studentRoutes');
 const tutorRoutes = require('./routes/tutorRoutes');
-const authRoutes = require('./routes/authRoutes'); 
-require('dotenv').config();
+const authRoutes = require('./routes/authRoutes');
+const courseRoutes = require('./routes/coursesRoutes'); 
 
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5003;
@@ -23,15 +24,10 @@ app.use(cors({ origin: 'http://localhost:3000' })); // Replace with your fronten
 app.use(bodyParser.json());
 
 // Routes
-app.use('/api/auth', authRoutes); // Authentication routes
-app.use('/api', studentRoutes);   // Student-related routes
-// Middleware
-app.use(cors()); // Adjust origin as needed
-app.use(bodyParser.json());
-
-// Register routes
-app.use('/api', studentRoutes);
-app.use('/api', tutorRoutes); 
+app.use('/api/auth', authRoutes);      // Authentication routes
+app.use('/api/students', studentRoutes); // Student-related routes
+app.use('/api/tutors', tutorRoutes);    // Tutor-related routes
+app.use('/api/courses', courseRoutes);  // Course-related routes
 
 // Default route
 app.get('/', (req, res) => {
