@@ -3,6 +3,6 @@ const { registerTutor } = require('../Controllers/tutorController');
 
 const router = express.Router();
 
-router.post('/tutors', registerTutor);
+router.post('/', registerTutor);
 
 module.exports = router;
