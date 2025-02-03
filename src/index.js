@@ -5,6 +5,7 @@ const studentRoutes = require('./routes/studentRoutes');
 const tutorRoutes = require('./routes/tutorRoutes');
 const authRoutes = require('./routes/authRoutes');
 const courseRoutes = require('./routes/coursesRoutes'); 
+const chatRoutes = require('./routes/chatRoutes');
 
 require('dotenv').config();
 
@@ -28,6 +29,7 @@ app.use('/api/auth', authRoutes);      // Authentication routes
 app.use('/api/students', studentRoutes); // Student-related routes
 app.use('/api/tutors', tutorRoutes);    // Tutor-related routes
 app.use('/api/courses', courseRoutes);  // Course-related routes
+app.use("/api/chat", chatRoutes);
 
 // Default route
 app.get('/', (req, res) => {
