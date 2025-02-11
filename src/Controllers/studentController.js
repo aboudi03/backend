@@ -42,7 +42,7 @@ const registerStudent = async (req, res) => {
       INSERT INTO users (first_name, last_name, email, phone_number, password_hash, user_type)
       VALUES (?, ?, ?, ?, ?, 'student')
     `;
-    const [userResult] = await db.promise().query(userSql, [
+    const [userResult] = await db.query(userSql, [
       firstName,
       lastName,
       email,
@@ -59,7 +59,7 @@ const registerStudent = async (req, res) => {
       INSERT INTO students (user_id, education_level, school, subjects, goals)
       VALUES (?, ?, ?, ?, ?)
     `;
-    await db.promise().query(studentSql, [
+    await db.query(studentSql, [
       userId,
       educationLevel,
       school,

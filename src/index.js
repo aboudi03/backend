@@ -1,47 +1,56 @@
-const express = require('express');
-const cors = require('cors'); 
-const bodyParser = require('body-parser');
-const studentRoutes = require('./routes/studentRoutes');
-const tutorRoutes = require('./routes/tutorRoutes');
-const authRoutes = require('./routes/authRoutes');
-const courseRoutes = require('./routes/coursesRoutes'); 
-const chatRoutes = require('./routes/chatRoutes');
+const express = require("express");
+const cors = require("cors"); 
+const bodyParser = require("body-parser");
+const cookieParser = require("cookie-parser");
 
-require('dotenv').config();
+require("dotenv").config();
 
-const app = express();
+// Import your routes
+const studentRoutes = require("./routes/studentRoutes");
+const tutorRoutes = require("./routes/tutorRoutes");
+const authRoutes = require("./routes/authRoutes");
+const courseRoutes = require("./routes/coursesRoutes"); 
+const chatRoutes = require("./routes/chatRoutes");
+
+const app = express();  
 const PORT = process.env.PORT || 5003;
 
-// Log Incoming Requests
+// Parse cookies
+app.use(cookieParser());
+
+// Log incoming requests
 app.use((req, res, next) => {
-    console.log(`Received ${req.method} request for ${req.url}`);
-    next();
+  console.log(`Received ${req.method} request for ${req.url}`);
+  next();
 });
 
-// Enable CORS for frontend (adjust origin as needed)
-app.use(cors({ origin: 'http://localhost:3000' })); // Replace with your frontend URL
+// Enable CORS for your frontend domain
+app.use(cors({
+  origin: "http://localhost:3000", // your frontend URL
+  credentials: true, // Required for sending cookies
+}));
 
-// Middleware to parse JSON requests
+// Parse JSON requests
 app.use(bodyParser.json());
 
-// Routes
-app.use('/api/auth', authRoutes);      // Authentication routes
-app.use('/api/students', studentRoutes); // Student-related routes
-app.use('/api/tutors', tutorRoutes);    // Tutor-related routes
-app.use('/api/courses', courseRoutes);  // Course-related routes
+// Use your routes
+app.use("/api/auth", authRoutes);
+app.use("/api/students", studentRoutes);
+app.use("/api/tutors", tutorRoutes);
+app.use("/api/courses", courseRoutes);
 app.use("/api/chat", chatRoutes);
 
 // Default route
-app.get('/', (req, res) => {
-    res.send('StudyBuddy API is running.');
+app.get("/", (req, res) => {
+  res.send("StudyBuddy API is running.");
 });
 
 // Catch-all route for undefined endpoints
 app.use((req, res) => {
-    res.status(404).json({ message: "Route not found" });
+  res.status(404).json({ message: "Route not found" });
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
