@@ -5,7 +5,6 @@ const { ensureTutor } = require("../middleware/authTutor");
 
 const router = express.Router();
 
-// ✅ GET: Fetch all courses (Publicly accessible)
 router.get("/", async (req, res) => {
   try {
     const [courses] = await db.query(`
