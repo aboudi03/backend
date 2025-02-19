@@ -10,14 +10,33 @@ const router = express.Router();
  */
 router.get("/", async (req, res) => {
   try {
-    const [courses] = await db.query(`
-      SELECT c.id, c.title, c.description, c.price, c.created_at, 
+    const { category } = req.query;
+
+    let sql = `
+      SELECT c.id, c.title, c.description, c.price, c.category, c.created_at, 
              t.user_id AS tutor_id, u.first_name, u.last_name
       FROM courses c
       JOIN tutors t ON c.tutor_id = t.id
       JOIN users u ON t.user_id = u.id
-    `);
+    `;
+
+    let values = [];
     
+    if (category && category !== "all") {
+      sql += " WHERE c.category = ?";
+      values.push(category);
+    }
+
+    console.log("📡 Fetching courses. Category:", category || "All Courses");
+    
+    const [courses] = await db.query(sql, values);
+
+    if (courses.length === 0) {
+      console.warn("⚠️ No courses found.");
+    } else {
+      console.log("✅ Courses found:", courses);
+    }
+
     res.status(200).json(courses);
   } catch (error) {
     console.error("❌ Database error:", error);
@@ -25,16 +44,23 @@ router.get("/", async (req, res) => {
   }
 });
 
+
+
+
 /**
  * 🔹 POST: Add a new course (Tutors Only)
  */
 router.post("/", authenticate, ensureTutor, async (req, res) => {
   try {
-    const { title, description, price } = req.body;
+    const { title, description, price , category } = req.body;
     const userId = req.user.id;
 
+    console.log("🟡 Received course data:", { title, description, price, category, userId });
+
+
+
     // ✅ Validate required fields
-    if (!title || !description || !price) {
+    if (!title || !description || !price || !category) {
       return res.status(400).json({ message: "All fields are required." });
     }
 
@@ -52,6 +78,8 @@ router.post("/", authenticate, ensureTutor, async (req, res) => {
 
     const tutorId = tutor[0].id;
 
+    console.log("🟢 Tutor found with ID:", tutorId);
+
     // ✅ Check if course title already exists for this tutor
     const [existingCourse] = await db.query(
       "SELECT id FROM courses WHERE title = ? AND tutor_id = ?",
@@ -62,10 +90,15 @@ router.post("/", authenticate, ensureTutor, async (req, res) => {
       return res.status(400).json({ message: "A course with this title already exists." });
     }
 
-    // ✅ Insert new course
+    const validCategories = ["web-development", "data-science", "ai-ml", "cybersecurity", "mobile-development", "software-engineering"];
+    if (!validCategories.includes(category)) {
+      return res.status(400).json({ message: "Invalid category." });
+    }
+
+    // Insert into database
     const [result] = await db.query(
-      "INSERT INTO courses (title, description, tutor_id, price) VALUES (?, ?, ?, ?)",
-      [title, description, tutorId, priceValue]
+      "INSERT INTO courses (title, description, tutor_id, price, category) VALUES (?, ?, ?, ?, ?)",
+      [title, description, tutorId, parseFloat(price), category.trim().toLowerCase()]
     );
 
     res.status(201).json({
