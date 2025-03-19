@@ -1,37 +1,34 @@
-# Node modules
+# 🔹 Node modules (dependencies)
 node_modules/
 
-# Dependencies
+# 🔹 Dependency lock files (keep if necessary for exact versions)
 package-lock.json
-package.json
+yarn.lock
 
-# Compiled output
+# 🔹 Compiled output (if you build your backend)
 dist/
 build/
 
-# Environment variables
+# 🔹 Environment variables (SECRET KEYS, API KEYS, DB PASSWORDS)
+.env
 src/.env
 
-# Git-specific files
-src/.gitignore
-
-# Source directories
-src/
-src/Controllers/
-src/db/
-src/middleware/
-src/routes/
-
-# Main entry file (if needed)
-src/index.js
-
-# Logs
+# 🔹 Logs
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# OS-specific files
+# 🔹 OS-Specific Files
 .DS_Store
 Thumbs.db
+
+# 🔹 Git-Specific Files (ignore only this .gitignore file inside src)
+src/.gitignore
+
+# 🔹 Ignore MySQL dump files (if any)
+*.sql
+*.sqlite
+
+
