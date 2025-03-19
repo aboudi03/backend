@@ -1,192 +1,114 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const db = require("../db/db");
+const { mongoConnection } = require("../db/mongo");
 const { authenticate } = require("../middleware/authMiddleware");
 const { ensureTutor } = require("../middleware/authTutor");
+const multer = require("multer");
+const { GridFSBucket } = require("mongodb");
+require("dotenv").config();
 
-const router = express.Router();
+const router = express.Router(); // ✅ Initialize the router correctly
+
+// ✅ Initialize GridFSBucket
+let gfsBucket;
+mongoConnection.once("open", () => {
+  gfsBucket = new GridFSBucket(mongoConnection.db, { bucketName: "uploads" });
+  console.log("✅ GridFSBucket initialized.");
+});
+
+// ✅ Multer Storage Configuration
+const storage = multer.memoryStorage(); // Store in memory before uploading to GridFS
+const upload = multer({ storage });
 
 /**
- * 🔹 GET: Fetch all courses with tutor details
+ * 🔹 Upload PDF File and Return fileId
  */
-router.get("/", async (req, res) => {
+router.post("/upload", authenticate, ensureTutor, upload.single("file"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded." });
+  }
+
   try {
-    const { category } = req.query;
+    const uploadStream = gfsBucket.openUploadStream(req.file.originalname, {
+      contentType: req.file.mimetype,
+    });
 
-    let sql = `
-      SELECT c.id, c.title, c.description, c.price, c.category, c.created_at, 
-             t.user_id AS tutor_id, u.first_name, u.last_name
-      FROM courses c
-      JOIN tutors t ON c.tutor_id = t.id
-      JOIN users u ON t.user_id = u.id
-    `;
+    uploadStream.end(req.file.buffer);
 
-    let values = [];
-    
-    if (category && category !== "all") {
-      sql += " WHERE c.category = ?";
-      values.push(category);
-    }
+    uploadStream.on("finish", () => {
+      console.log("📂 File uploaded to MongoDB:", uploadStream.id);
+      res.status(201).json({
+        message: "File uploaded successfully.",
+        fileId: uploadStream.id.toString(),
+      });
+    });
 
-    console.log("📡 Fetching courses. Category:", category || "All Courses");
-    
-    const [courses] = await db.query(sql, values);
-
-    if (courses.length === 0) {
-      console.warn("⚠️ No courses found.");
-    } else {
-      console.log("✅ Courses found:", courses);
-    }
-
-    res.status(200).json(courses);
   } catch (error) {
-    console.error("❌ Database error:", error);
-    res.status(500).json({ message: "Failed to fetch courses." });
+    console.error("❌ Upload error:", error);
+    res.status(500).json({ message: "Error uploading file." });
   }
 });
 
-
-
-
 /**
- * 🔹 POST: Add a new course (Tutors Only)
+ * 🔹 POST: Add a new course (Tutors Only) - Stores fileId in MySQL
  */
 router.post("/", authenticate, ensureTutor, async (req, res) => {
   try {
-    const { title, description, price , category } = req.body;
+    console.log("📄 Data received in backend:", req.body);
+    const { title, description, price, category, fileId } = req.body;
+
+    if (!title || !description || !price || !category || !fileId) {
+      console.error("❌ Missing required fields:", { title, description, price, category, fileId });
+      return res.status(400).json({ message: "All fields, including file upload, are required." });
+    }
+
     const userId = req.user.id;
+    console.log("🟢 Authenticated tutor ID:", userId);
 
-    console.log("🟡 Received course data:", { title, description, price, category, userId });
-
-
-
-    // ✅ Validate required fields
-    if (!title || !description || !price || !category) {
-      return res.status(400).json({ message: "All fields are required." });
-    }
-
-    // ✅ Validate price
-    const priceValue = parseFloat(price);
-    if (isNaN(priceValue) || priceValue < 0) {
-      return res.status(400).json({ message: "Invalid price. It must be a positive number." });
-    }
-
-    // ✅ Ensure tutor exists
+    // Ensure tutor exists
     const [tutor] = await db.query("SELECT id FROM tutors WHERE user_id = ?", [userId]);
     if (tutor.length === 0) {
+      console.error("❌ Tutor not found in database.");
       return res.status(403).json({ message: "You are not a registered tutor." });
     }
 
     const tutorId = tutor[0].id;
+    console.log("✅ Tutor ID:", tutorId);
 
-    console.log("🟢 Tutor found with ID:", tutorId);
-
-    // ✅ Check if course title already exists for this tutor
-    const [existingCourse] = await db.query(
-      "SELECT id FROM courses WHERE title = ? AND tutor_id = ?",
-      [title, tutorId]
-    );
-
-    if (existingCourse.length > 0) {
-      return res.status(400).json({ message: "A course with this title already exists." });
-    }
-
-    const validCategories = ["web-development", "data-science", "ai-ml", "cybersecurity", "mobile-development", "software-engineering"];
-    if (!validCategories.includes(category)) {
-      return res.status(400).json({ message: "Invalid category." });
-    }
-
-    // Insert into database
+    // Insert course into MySQL
     const [result] = await db.query(
-      "INSERT INTO courses (title, description, tutor_id, price, category) VALUES (?, ?, ?, ?, ?)",
-      [title, description, tutorId, parseFloat(price), category.trim().toLowerCase()]
+      "INSERT INTO courses (title, description, tutor_id, price, category, file_id) VALUES (?, ?, ?, ?, ?, ?)",
+      [title, description, tutorId, parseFloat(price), category.trim().toLowerCase(), fileId]
     );
 
+    console.log("✅ Course inserted into MySQL. Course ID:", result.insertId);
     res.status(201).json({
       message: "Course added successfully!",
       courseId: result.insertId,
     });
+
   } catch (error) {
-    console.error("❌ Database error:", error);
+    console.error("❌ MySQL Insert Error:", error);
     res.status(500).json({ message: "Server error." });
   }
 });
 
 /**
- * 🔹 PUT: Update an existing course (Tutors Only)
+ * 🔹 GET: Fetch file (PDF) from MongoDB
  */
-router.put("/:courseId", authenticate, ensureTutor, async (req, res) => {
+router.get("/file/:fileId", async (req, res) => {
   try {
-    const { courseId } = req.params;
-    const { title, description, price } = req.body;
-    const userId = req.user.id;
+    const fileId = new mongoose.Types.ObjectId(req.params.fileId);
+    const downloadStream = gfsBucket.openDownloadStream(fileId);
 
-    // ✅ Validate input
-    if (!title || !description || !price) {
-      return res.status(400).json({ message: "All fields are required." });
-    }
+    res.set("Content-Type", "application/pdf");
+    downloadStream.pipe(res);
 
-    const priceValue = parseFloat(price);
-    if (isNaN(priceValue) || priceValue < 0) {
-      return res.status(400).json({ message: "Invalid price. It must be a positive number." });
-    }
-
-    // ✅ Ensure tutor exists
-    const [tutor] = await db.query("SELECT id FROM tutors WHERE user_id = ?", [userId]);
-    if (tutor.length === 0) {
-      return res.status(403).json({ message: "You are not a registered tutor." });
-    }
-
-    const tutorId = tutor[0].id;
-
-    // ✅ Ensure course exists and belongs to this tutor
-    const [course] = await db.query("SELECT * FROM courses WHERE id = ? AND tutor_id = ?", [courseId, tutorId]);
-    if (course.length === 0) {
-      return res.status(404).json({ message: "Course not found or unauthorized." });
-    }
-
-    // ✅ Update course
-    await db.query(
-      "UPDATE courses SET title = ?, description = ?, price = ? WHERE id = ?",
-      [title, description, priceValue, courseId]
-    );
-
-    res.status(200).json({ message: "Course updated successfully!" });
   } catch (error) {
-    console.error("❌ Database error:", error);
-    res.status(500).json({ message: "Server error." });
+    console.error("❌ File fetch error:", error);
+    res.status(500).json({ message: "Error fetching file." });
   }
 });
 
-/**
- * 🔹 DELETE: Remove a course (Tutors Only)
- */
-router.delete("/:courseId", authenticate, ensureTutor, async (req, res) => {
-  try {
-    const { courseId } = req.params;
-    const userId = req.user.id;
-
-    // ✅ Ensure tutor exists
-    const [tutor] = await db.query("SELECT id FROM tutors WHERE user_id = ?", [userId]);
-    if (tutor.length === 0) {
-      return res.status(403).json({ message: "You are not a registered tutor." });
-    }
-
-    const tutorId = tutor[0].id;
-
-    // ✅ Ensure course exists and belongs to this tutor
-    const [course] = await db.query("SELECT * FROM courses WHERE id = ? AND tutor_id = ?", [courseId, tutorId]);
-    if (course.length === 0) {
-      return res.status(404).json({ message: "Course not found or unauthorized." });
-    }
-
-    // ✅ Delete course
-    await db.query("DELETE FROM courses WHERE id = ?", [courseId]);
-
-    res.status(200).json({ message: "Course deleted successfully!" });
-  } catch (error) {
-    console.error("❌ Database error:", error);
-    res.status(500).json({ message: "Server error." });
-  }
-});
-
-module.exports = router;
+module.exports = router; // ✅ Ensure this is at the end of the file

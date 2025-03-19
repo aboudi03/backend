@@ -1,30 +1,38 @@
 const mysql = require("mysql2");
+const { mongoConnection, gfs } = require("./mongo"); // ✅ Import MongoDB Connection
 require("dotenv").config();
 
-const pool = mysql.createPool({
+// ✅ MySQL Connection Pool
+const mysqlPool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 3306,
-  connectTimeout: 20000, // 20 seconds
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
 });
 
-// Test the pool connection
-pool.getConnection((err, connection) => {
+// ✅ Convert MySQL Pool to Promises
+const db = mysqlPool.promise(); // Ensures async queries
+
+// ✅ Check MySQL Connection
+mysqlPool.getConnection((err, connection) => {
   if (err) {
-    console.error("Database connection failed:", err.stack);
+    console.error("❌ MySQL connection failed:", err.stack);
     process.exit(1);
   }
-  console.log("Connected to MySQL database.");
-  connection.release(); // Release it back to the pool
+  console.log("✅ Connected to MySQL database.");
+  connection.release();
 });
 
-// Create a promise-based pool for async/await
-const db = pool.promise();
+// ✅ Debugging: Ensure `db` is valid
+if (!db.query) {
+  console.error("❌ MySQL `db` is not correctly initialized! Check your `db.js`.");
+} else {
+  console.log("✅ MySQL `db.query` is ready.");
+}
 
-// Export this promise-based pool
+// ✅ Export both databases correctly
 module.exports = db;
