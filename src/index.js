@@ -11,6 +11,9 @@ const tutorRoutes = require("./routes/tutorRoutes");
 const authRoutes = require("./routes/authRoutes");
 const courseRoutes = require("./routes/coursesRoutes"); 
 const chatRoutes = require("./routes/chatRoutes");
+const reviewsRoutes = require("./routes/reviewRoutes");
+const enrollmentRoutes = require("./routes/enrollmentRoutes");
+
 
 const app = express();  
 const PORT = process.env.PORT || 5003;
@@ -39,6 +42,9 @@ app.use("/api/students", studentRoutes);
 app.use("/api/tutors", tutorRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/reviews", reviewsRoutes);
+app.use("/api/enrollments", enrollmentRoutes);
+
 
 // Default route
 app.get("/", (req, res) => {
