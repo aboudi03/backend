@@ -8,7 +8,7 @@ const multer = require("multer");
 const { GridFSBucket } = require("mongodb");
 require("dotenv").config();
 
-const router = express.Router(); // ✅ Initialize the router correctly
+const router = express.Router();
 
 // ✅ Initialize GridFSBucket
 let gfsBucket;
@@ -18,11 +18,34 @@ mongoConnection.once("open", () => {
 });
 
 // ✅ Multer Storage Configuration
-const storage = multer.memoryStorage(); // Store in memory before uploading to GridFS
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 /**
- * 🔹 Upload PDF File and Return fileId
+ * 🔹 GET: Fetch all courses from MySQL, with `file_id` for PDF preview
+ */
+router.get("/", async (req, res) => {
+  try {
+    const sql = `
+      SELECT c.id, c.title, c.description, c.price, c.category, c.file_id, 
+             t.user_id AS tutor_id, u.first_name, u.last_name
+      FROM courses c
+      JOIN tutors t ON c.tutor_id = t.id
+      JOIN users u ON t.user_id = u.id
+    `;
+
+    const [courses] = await db.query(sql);
+
+    console.log("✅ Courses retrieved:", courses);
+    res.status(200).json(courses);
+  } catch (error) {
+    console.error("❌ Error fetching courses:", error);
+    res.status(500).json({ message: "Failed to fetch courses." });
+  }
+});
+
+/**
+ * 🔹 Upload PDF/Video File and Return fileId
  */
 router.post("/upload", authenticate, ensureTutor, upload.single("file"), async (req, res) => {
   if (!req.file) {
@@ -95,7 +118,7 @@ router.post("/", authenticate, ensureTutor, async (req, res) => {
 });
 
 /**
- * 🔹 GET: Fetch file (PDF) from MongoDB
+ * 🔹 GET: Fetch file (PDF/Video) from MongoDB
  */
 router.get("/file/:fileId", async (req, res) => {
   try {
@@ -111,4 +134,4 @@ router.get("/file/:fileId", async (req, res) => {
   }
 });
 
-module.exports = router; // ✅ Ensure this is at the end of the file
+module.exports = router;
