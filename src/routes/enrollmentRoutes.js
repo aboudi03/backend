@@ -71,6 +71,26 @@ router.get("/my-courses", authenticate, async (req, res) => {
   }
 });
 
+router.get("/my-schedule", authenticate, async (req, res) => {
+  try {
+    const student_id = req.user.id;
+
+    const [sessions] = await db.query(`
+      SELECT cs.*
+      FROM course_sessions cs
+      JOIN enrollments e ON cs.course_id = e.course_id
+      WHERE e.student_id = ?
+      ORDER BY cs.scheduled_at ASC
+    `, [student_id]);
+
+    res.status(200).json(sessions);
+  } catch (error) {
+    console.error("❌ Error fetching student schedule:", error);
+    res.status(500).json({ message: "Failed to fetch schedule." });
+  }
+});
+
+
 
 
 module.exports = router;
