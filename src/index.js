@@ -1,5 +1,5 @@
 const express = require("express");
-const cors = require("cors"); 
+const cors = require("cors");
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 
@@ -9,13 +9,13 @@ require("dotenv").config();
 const studentRoutes = require("./routes/studentRoutes");
 const tutorRoutes = require("./routes/tutorRoutes");
 const authRoutes = require("./routes/authRoutes");
-const courseRoutes = require("./routes/coursesRoutes"); 
+const courseRoutes = require("./routes/coursesRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const reviewsRoutes = require("./routes/reviewRoutes");
 const enrollmentRoutes = require("./routes/enrollmentRoutes");
+const profileRoutes = require("./routes/profileRoutes"); // Make sure this exists if using profile endpoints
 
-
-const app = express();  
+const app = express();
 const PORT = process.env.PORT || 5003;
 
 // Parse cookies
@@ -28,10 +28,12 @@ app.use((req, res, next) => {
 });
 
 // Enable CORS for your frontend domain
-app.use(cors({
-  origin: "http://localhost:3000", // your frontend URL
-  credentials: true, // Required for sending cookies
-}));
+app.use(
+  cors({
+    origin: "http://localhost:3000", // Adjust if your frontend URL changes
+    credentials: true, // Required for sending cookies
+  })
+);
 
 // Parse JSON requests
 app.use(bodyParser.json());
@@ -44,7 +46,7 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
-
+app.use("/api/profile", profileRoutes);
 
 // Default route
 app.get("/", (req, res) => {
