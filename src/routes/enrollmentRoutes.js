@@ -38,6 +38,8 @@ router.post("/enroll", authenticate, async (req, res) => {
       [student_id, course_id]
     );
 
+   
+
     res.status(200).json({ message: "Enrollment successful!" });
   } catch (error) {
     console.error("❌ Enrollment error:", error);
@@ -89,6 +91,7 @@ router.get("/my-schedule", authenticate, async (req, res) => {
     res.status(500).json({ message: "Failed to fetch schedule." });
   }
 });
+
 
 
 

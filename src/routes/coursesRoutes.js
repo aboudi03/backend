@@ -6,6 +6,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 const { ensureTutor } = require("../middleware/authTutor");
 const multer = require("multer");
 const { GridFSBucket } = require("mongodb");
+const { notifyAllStudents, notifyEnrolledStudents } = require("../utils/notificationHelper"); // 🔔 Import
 require("dotenv").config();
 
 const router = express.Router();
@@ -25,16 +26,24 @@ const upload = multer({ storage });
 // ────────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const sql = `
+    const { category } = req.query;
+
+    let sql = `
       SELECT c.id, c.title, c.description, c.price, c.category,
              t.user_id AS tutor_id, u.first_name, u.last_name
       FROM courses c
       JOIN tutors t ON c.tutor_id = t.id
       JOIN users u ON t.user_id = u.id
     `;
-    const [courses] = await db.query(sql);
+    const params = [];
 
-    // Fetch PDFs per course
+    if (category) {
+      sql += " WHERE c.category = ?";
+      params.push(category.toLowerCase());
+    }
+
+    const [courses] = await db.query(sql, params);
+
     const courseWithPDFs = await Promise.all(
       courses.map(async (course) => {
         const [files] = await db.query(
@@ -56,6 +65,7 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch courses." });
   }
 });
+
 
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 2) GET: Fetch all sessions/announcements (ARRAY of sessions)
@@ -93,7 +103,7 @@ router.post(
       uploadStream.end(req.file.buffer);
 
       uploadStream.on("finish", () => {
-        console.log("📂 File uploaded to MongoDB:", uploadStream.id);
+        console.log("📂 File uploaded:", uploadStream.id);
         res.status(201).json({
           message: "File uploaded successfully.",
           fileId: uploadStream.id.toString(),
@@ -155,6 +165,9 @@ router.post(
       );
 
       const courseId = courseResult.insertId;
+
+      // 🔔 Notify all students
+      await notifyAllStudents(`A new course "${title}" has been added.`, "new_course");
 
       // Handle file uploads
       const files = req.files;
@@ -231,6 +244,20 @@ router.post("/:courseId/sessions", authenticate, ensureTutor, async (req, res) =
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [courseId, courseCheck[0].tutor_id, title, description, type, scheduled_at, duration]
     );
+       // 🔔 Notify enrolled students
+       const sessionMessage =
+       type === "announcement"
+         ? `New announcement posted: "${title}"`
+         : `Live session scheduled: "${title}"`;
+ 
+ 
+ 
+    console.log("📢 Calling notifyEnrolledStudents for course:", courseId);
+ 
+ 
+ 
+ 
+     await notifyEnrolledStudents(courseId, sessionMessage, type);
 
     res.status(201).json({ message: "Session/announcement created successfully!" });
   } catch (err) {

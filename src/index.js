@@ -14,6 +14,8 @@ const chatRoutes = require("./routes/chatRoutes");
 const reviewsRoutes = require("./routes/reviewRoutes");
 const enrollmentRoutes = require("./routes/enrollmentRoutes");
 const profileRoutes = require("./routes/profileRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+
 
 
 const app = express();  
@@ -46,6 +48,8 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/notifications", notificationRoutes);
+
 
 
 // Default route

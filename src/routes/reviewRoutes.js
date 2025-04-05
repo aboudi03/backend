@@ -45,6 +45,8 @@ router.post("/", authenticate, async (req, res) => {
       "INSERT INTO reviews (student_id, tutor_id, course_id, rating, review) VALUES (?, ?, ?, ?, ?)",
       [student_id, tutor_id, course_id, rating, review]
     );
+    
+    
 
     res.status(201).json({ message: "Review submitted successfully!" });
   } catch (error) {
@@ -53,9 +55,7 @@ router.post("/", authenticate, async (req, res) => {
   }
 });
 
-/**
- * 🔹 GET: Fetch all reviews for a specific tutor
- */
+
 /**
  * 🔹 GET: Fetch all reviews for a specific tutor
  */
