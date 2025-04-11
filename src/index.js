@@ -18,7 +18,7 @@ const express = require("express");
  const notificationRoutes = require("./routes/notificationRoutes");
  const adminRoutes = require("./routes/adminRoutes");
  const roadmapRoutes = require("./routes/roadmapRoutes");
- 
+ const geminiRoutes = require("./routes/gemini");
  
  
  
@@ -55,7 +55,8 @@ const express = require("express");
  app.use("/api/notifications", notificationRoutes);
  app.use("/api/admin", adminRoutes);
  app.use("/api/roadmap", roadmapRoutes);
- 
+ app.use("/api/gemini", geminiRoutes);
+
  
  
  // Default route
