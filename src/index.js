@@ -17,6 +17,8 @@ const express = require("express");
  const profileRoutes = require("./routes/profileRoutes");
  const notificationRoutes = require("./routes/notificationRoutes");
  const adminRoutes = require("./routes/adminRoutes");
+ const roadmapRoutes = require("./routes/roadmapRoutes");
+ 
  
  
  
@@ -51,7 +53,8 @@ const express = require("express");
  app.use("/api/enrollments", enrollmentRoutes);
  app.use("/api/profile", profileRoutes);
  app.use("/api/notifications", notificationRoutes);
-    app.use("/api/admin", adminRoutes);
+ app.use("/api/admin", adminRoutes);
+ app.use("/api/roadmap", roadmapRoutes);
  
  
  
