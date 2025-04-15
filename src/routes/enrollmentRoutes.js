@@ -56,20 +56,57 @@ router.get("/my-courses", authenticate, async (req, res) => {
 
     const [courses] = await db.query(
       `SELECT c.id, c.title, c.description, c.price, c.category, c.created_at, 
-              t.id AS tutor_id, u.first_name AS tutor_first_name, u.last_name AS tutor_last_name
+              t.id AS tutor_id, u.first_name AS tutor_first_name, u.last_name AS tutor_last_name, e.progress
        FROM courses c
        JOIN enrollments e ON c.id = e.course_id
        JOIN tutors t ON c.tutor_id = t.id
-       JOIN users u ON t.user_id = u.id  -- 🔹 Fetch tutor name from users table
+       JOIN users u ON t.user_id = u.id
        WHERE e.student_id = ?`,
       [student_id]
     );
 
-    console.log("📤 Sending Enrolled Courses:", courses);
-    res.status(200).json(courses);
+    // Combine tutor name into a single field for frontend compatibility
+    const coursesWithTutor = courses.map(course => ({
+      ...course,
+      tutor: `${course.tutor_first_name || ''} ${course.tutor_last_name || ''}`.trim(),
+    }));
+
+    console.log("📤 Sending Enrolled Courses:", coursesWithTutor);
+    res.status(200).json(coursesWithTutor);
   } catch (error) {
     console.error("❌ Error fetching enrolled courses:", error);
     res.status(500).json({ message: "Failed to fetch courses." });
+  }
+});
+
+// --- PATCH: Update course progress for a student ---
+router.patch("/:courseId/progress", authenticate, async (req, res) => {
+  try {
+    const student_id = req.user.id;
+    const { courseId } = req.params;
+    const { progress } = req.body;
+
+    if (typeof progress !== "number" || progress < 0 || progress > 100) {
+      return res.status(400).json({ message: "Progress must be a number between 0 and 100." });
+    }
+
+    // Ensure enrollment exists
+    const [enrollment] = await db.query(
+      "SELECT * FROM enrollments WHERE student_id = ? AND course_id = ?",
+      [student_id, courseId]
+    );
+    if (!enrollment.length) {
+      return res.status(404).json({ message: "Enrollment not found." });
+    }
+
+    await db.query(
+      "UPDATE enrollments SET progress = ? WHERE student_id = ? AND course_id = ?",
+      [progress, student_id, courseId]
+    );
+    res.status(200).json({ message: "Progress updated successfully." });
+  } catch (error) {
+    console.error("❌ Error updating progress:", error);
+    res.status(500).json({ message: "Failed to update progress." });
   }
 });
 

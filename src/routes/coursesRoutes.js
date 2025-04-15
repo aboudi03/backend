@@ -315,6 +315,17 @@ router.get("/:id", async (req, res) => {
       .filter((file) => file.type === "video")
       .map((file) => `http://localhost:5003/api/courses/file/${file.file_id}`);
 
+    let progress = null;
+    if (req.user && req.user.id) {
+      const [enrollment] = await db.query(
+        "SELECT progress FROM enrollments WHERE student_id = ? AND course_id = ?",
+        [req.user.id, courseId]
+      );
+      if (enrollment.length > 0) {
+        progress = enrollment[0].progress;
+      }
+    }
+
     res.status(200).json({
       id: course.id,
       title: course.title,
@@ -325,6 +336,7 @@ router.get("/:id", async (req, res) => {
       pdfs,
       videos,
       playlistUrl: null,
+      progress,
     });
   } catch (error) {
     console.error("❌ Error fetching course detail:", error);
