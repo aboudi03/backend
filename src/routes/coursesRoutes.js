@@ -216,7 +216,7 @@ router.post(
 router.post("/:courseId/sessions", authenticate, ensureTutor, async (req, res) => {
   try {
     const { courseId } = req.params;
-    const { title, description, type, scheduled_at } = req.body;
+    const { title, description, type, scheduled_at, visibility } = req.body;
     const duration = 60; // default if not provided
     const userId = req.user.id;
 
@@ -240,9 +240,9 @@ router.post("/:courseId/sessions", authenticate, ensureTutor, async (req, res) =
 
     // Insert session/announcement
     await db.query(
-      `INSERT INTO course_sessions (course_id, tutor_id, title, description, type, scheduled_at, duration_minutes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [courseId, courseCheck[0].tutor_id, title, description, type, scheduled_at, duration]
+      `INSERT INTO course_sessions (course_id, tutor_id, title, description, type, scheduled_at, duration_minutes, visibility)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [courseId, courseCheck[0].tutor_id, title, description, type, scheduled_at, duration, visibility || 'private']
     );
        // 🔔 Notify enrolled students
        const sessionMessage =
@@ -411,6 +411,26 @@ router.delete("/:id", authenticate, ensureTutor, async (req, res) => {
     res.status(500).json({ message: "Failed to delete course." });
   }
 });
+
+// ✅ GET: Fetch all public announcements 
+router.get("/announcements/public", async (req, res) => {
+  try {
+    const [announcements] = await db.query(`
+       SELECT cs.title, cs.description, cs.type, cs.scheduled_at, u.first_name, u.last_name
+      FROM course_sessions cs
+      JOIN tutors t ON cs.tutor_id = t.id
+      JOIN users u ON t.user_id = u.id
+      WHERE cs.visibility = 'public'
+      ORDER BY cs.scheduled_at DESC
+      LIMIT 6
+    `);
+    res.status(200).json(announcements);
+  } catch (err) {
+    console.error("❌ Error fetching public announcements:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 
 module.exports = router;
