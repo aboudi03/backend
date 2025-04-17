@@ -117,28 +117,46 @@ router.post(
 );
 
 // ────────────────────────────────────────────────────────────────────────────────
-// ✅ 4) POST: Add a new course (+ multiple files) for tutors
+// ✅ 4) POST: Add a new course (+ multiple files organized by section) for tutors
 // ────────────────────────────────────────────────────────────────────────────────
 router.post(
   "/",
   authenticate,
   ensureTutor,
-  upload.array("files"),
+  upload.any(), // Use upload.any() to accept files with arbitrary field names
   async (req, res) => {
+    console.log("--- Add Course Request Start ---"); // Log start
+    console.log("Received Body:", req.body); // Log body
+    console.log("Received Files:", req.files); // Log files
     try {
-      const { title, description, price, category, types } = req.body;
+      // Destructure basic course info and the new sections structure
+      const { title, description, price, category, sections: sectionsJson } = req.body;
+      const files = req.files; // All uploaded files are in req.files
 
       if (
         !title ||
         !description ||
         !price ||
         !category ||
-        !req.files ||
-        req.files.length === 0
+        !sectionsJson ||
+        !files ||
+        files.length === 0
       ) {
-        return res
-          .status(400)
-          .json({ message: "All fields including files are required." });
+        return res.status(400).json({
+          message:
+            "All fields, including section structure and at least one file, are required.",
+        });
+      }
+
+      let sections;
+      try {
+        sections = JSON.parse(sectionsJson);
+        console.log("Parsed Sections:", sections); // Log parsed sections
+        if (!Array.isArray(sections) || sections.length === 0) {
+          throw new Error("Invalid sections format.");
+        }
+      } catch (e) {
+        return res.status(400).json({ message: "Invalid sections JSON data." });
       }
 
       const userId = req.user.id;
@@ -152,60 +170,139 @@ router.post(
 
       const tutorId = tutorRows[0].id;
 
-      // Insert course into MySQL
-      const [courseResult] = await db.query(
-        "INSERT INTO courses (title, description, tutor_id, price, category) VALUES (?, ?, ?, ?, ?)",
-        [
-          title,
-          description,
-          tutorId,
-          parseFloat(price),
-          category.trim().toLowerCase(),
-        ]
-      );
+      // --- Database Transaction --- (Recommended for multi-step operations)
+      const connection = await db.getConnection();
+      await connection.beginTransaction();
 
-      const courseId = courseResult.insertId;
+      try {
+        // 1. Insert course into MySQL
+        const [courseResult] = await connection.query(
+          "INSERT INTO courses (title, description, tutor_id, price, category) VALUES (?, ?, ?, ?, ?)",
+          [
+            title,
+            description,
+            tutorId,
+            parseFloat(price),
+            category.trim().toLowerCase(),
+          ]
+        );
+        const courseId = courseResult.insertId;
 
-      // 🔔 Notify all students
-      await notifyAllStudents(`A new course "${title}" has been added.`, "new_course");
+        // 🔔 Notify all students (Consider moving after successful commit)
+        // await notifyAllStudents(`A new course "${title}" has been added.`, "new_course");
 
-      // Handle file uploads
-      const files = req.files;
-      const fileTypes = JSON.parse(types);
+        // 2. Process sections and files
+        // Organize files by section index based on fieldname
+        const filesBySection = {};
+        for (const file of files) {
+          const match = file.fieldname.match(/^section_(\d+)_file_(\d+)$/);
+          if (match) {
+            const sectionIndex = parseInt(match[1], 10);
+            const fileIndex = parseInt(match[2], 10);
+            if (!filesBySection[sectionIndex]) {
+              filesBySection[sectionIndex] = [];
+            }
+            // Store file with its original index for ordering
+            filesBySection[sectionIndex][fileIndex] = file;
+          } else {
+            console.warn(`Skipping file with unexpected fieldname: ${file.fieldname}`);
+          }
+        }
+        console.log("Files Organized by Section:", filesBySection); // Log organized files
 
-      const uploadPromises = files.map((file, index) => {
-        return new Promise((resolve, reject) => {
-          const uploadStream = gfsBucket.openUploadStream(file.originalname, {
-            contentType: file.mimetype,
+        for (const [sectionIndex, sectionData] of sections.entries()) {
+          console.log(`Processing Section ${sectionIndex}:`, sectionData); // Log section being processed
+          if (!sectionData.name || typeof sectionData.fileCount !== 'number') {
+            throw new Error(`Invalid data for section ${sectionIndex}.`);
+          }
+
+          // Insert section
+          const [sectionResult] = await connection.query(
+            "INSERT INTO course_sections (course_id, name, order_index) VALUES (?, ?, ?)",
+            [courseId, sectionData.name, sectionIndex]
+          );
+          const sectionId = sectionResult.insertId;
+
+          // Process files for this section using the organized structure
+          const sectionFiles = (filesBySection[sectionIndex] || []).filter(f => f); // Get files for this section, filter out empty slots if any
+          console.log(`Section ${sectionIndex} - Parsed Files Count: ${sectionFiles.length}, Expected Count (from body): ${sectionData.fileCount}`); // Log counts before check
+
+          if (sectionFiles.length !== sectionData.fileCount) {
+            console.error(`File count mismatch error for section ${sectionIndex}. Expected ${sectionData.fileCount}, got ${sectionFiles.length}.`); // Log mismatch error
+            throw new Error(`File count mismatch for section ${sectionIndex}. Expected ${sectionData.fileCount}, got ${sectionFiles.length}. Check backend file parsing logic.`);
+          }
+
+          // Sort files by their original index to maintain order
+          // sectionFiles.sort((a, b) => {
+          //   const indexA = parseInt(a.fieldname.match(/_file_(\d+)$/)[1], 10);
+          //   const indexB = parseInt(b.fieldname.match(/_file_(\d+)$/)[1], 10);
+          //   return indexA - indexB;
+          // });
+
+          const uploadPromises = sectionFiles.map((file, fileIndex) => { // fileIndex here is the index within the sorted sectionFiles array
+            return new Promise((resolve, reject) => {
+              const uploadStream = gfsBucket.openUploadStream(file.originalname, {
+                contentType: file.mimetype,
+              });
+
+              uploadStream.end(file.buffer);
+
+              uploadStream.on("finish", async () => {
+                try {
+                  const fileId = uploadStream.id.toString();
+                  // Determine file type (e.g., from mimetype or keep simple 'file')
+                  const fileType = file.mimetype.startsWith("video") ? "video" : (file.mimetype === 'application/pdf' ? 'pdf' : 'other');
+                  console.log(`DB Insert course_files: courseId=${courseId}, sectionId=${sectionId}, fileId=${fileId}, type=${fileType}, order=${fileIndex}, name=${file.originalname}`); // Log DB insert details
+
+                  // Insert into course_files, linking to the section
+                  // You'll need to add `section_id` and `order_index` columns to `course_files` table and make `type` more generic or remove it if storing in sections.
+                  // ALTER TABLE course_files ADD COLUMN section_id INT NULL, ADD COLUMN order_index INT NULL, ADD CONSTRAINT fk_section FOREIGN KEY (section_id) REFERENCES course_sections(id);
+                  await connection.query(
+                    "INSERT INTO course_files (course_id, section_id, file_id, type, order_index, original_name) VALUES (?, ?, ?, ?, ?, ?)",
+                    [courseId, sectionId, fileId, fileType, fileIndex, file.originalname] // Store original name
+                  );
+                  resolve();
+                } catch (dbError) {
+                  console.error(`❌ DB Error inserting file record for ${file.originalname}:`, dbError); // Log DB error
+                  reject(dbError);
+                }
+              });
+
+              uploadStream.on("error", (uploadError) => {
+                 console.error(`❌ Error uploading file ${file.originalname} to GridFS:`, uploadError);
+                 reject(uploadError);
+              });
+            });
           });
 
-          uploadStream.end(file.buffer);
+          await Promise.all(uploadPromises);
+        }
 
-          uploadStream.on("finish", async () => {
-            const fileId = uploadStream.id.toString();
-            const fileType = fileTypes[index] || "pdf";
+        // Commit transaction
+        await connection.commit();
+        console.log(`✅ Course ${courseId} committed successfully.`); // Log commit
 
-            await db.query(
-              "INSERT INTO course_files (course_id, file_id, type) VALUES (?, ?, ?)",
-              [courseId, fileId, fileType]
-            );
+        // 🔔 Notify after successful commit
+        await notifyAllStudents(`A new course "${title}" has been added.`, "new_course");
 
-            resolve();
-          });
+        res.status(201).json({ message: "Course added successfully.", courseId });
+      } catch (error) {
+        // Rollback transaction on error
+        await connection.rollback();
+        console.error("❌ Error during course creation transaction (rolled back):", error); // Log transaction error
+        // Clean up potentially uploaded GridFS files if needed (more complex)
+        res.status(500).json({ message: "Failed to add course.", error: error.message });
+      }
+      finally {
+        connection.release(); // Release connection back to the pool
+        console.log("--- Add Course Request End (Transaction Finished) ---"); // Log end
+      }
 
-          uploadStream.on("error", reject);
-        });
-      });
-
-      await Promise.all(uploadPromises);
-
-      res.status(201).json({
-        message: "Course and all files uploaded successfully",
-        courseId,
-      });
-    } catch (err) {
-      console.error("❌ Error adding course with files:", err);
-      res.status(500).json({ message: "Server error" });
+    } catch (error) {
+      // Catch errors before transaction starts
+      console.error("❌ Error adding course (before transaction):", error); // Log pre-transaction error
+      res.status(500).json({ message: "Failed to add course.", error: error.message });
+      console.log("--- Add Course Request End (Error Before Transaction) ---"); // Log end
     }
   }
 );
@@ -302,18 +399,88 @@ router.get("/:id", async (req, res) => {
     }
 
     const course = results[0];
-    const [files] = await db.query(
-      `SELECT file_id, type FROM course_files WHERE course_id = ?`,
+
+    // Fetch sections for the course, ordered
+    const [sectionsResult] = await db.query(
+      `SELECT id, name AS title, order_index 
+       FROM course_sections 
+       WHERE course_id = ? 
+       ORDER BY order_index ASC`,
       [courseId]
     );
 
-    const pdfs = files
-      .filter((file) => file.type === "pdf")
-      .map((file) => `http://localhost:5003/api/courses/file/${file.file_id}`);
+    // Fetch all files for the course once
+    const [allFilesResult] = await db.query(
+      `SELECT id, section_id, file_id, original_name AS name, order_index 
+       FROM course_files 
+       WHERE course_id = ? 
+       ORDER BY section_id, order_index ASC`,
+      [courseId]
+    );
 
-    const videos = files
-      .filter((file) => file.type === "video")
-      .map((file) => `http://localhost:5003/api/courses/file/${file.file_id}`);
+    // Group files by section_id
+    const filesBySection = allFilesResult.reduce((acc, file) => {
+      const sectionId = file.section_id;
+      if (!acc[sectionId]) {
+        acc[sectionId] = [];
+      }
+      acc[sectionId].push({
+        id: file.id, // Use course_files primary key if needed, or file_id
+        name: file.name,
+        url: `http://localhost:5003/api/courses/file/${file.file_id}` // Construct URL
+      });
+      return acc;
+    }, {});
+
+    let sections = [];
+    // Check if sections exist for the course
+    if (sectionsResult.length > 0) {
+      // Group files by section_id
+      const filesBySection = allFilesResult.reduce((acc, file) => {
+        const sectionId = file.section_id;
+        if (!acc[sectionId]) {
+          acc[sectionId] = [];
+        }
+        acc[sectionId].push({
+          id: file.id, // Use course_files primary key if needed, or file_id
+          name: file.name,
+          url: `http://localhost:5003/api/courses/file/${file.file_id}` // Construct URL
+        });
+        return acc;
+      }, {});
+
+      // Map sections and attach their files
+      sections = sectionsResult.map(section => ({
+        id: section.id,
+        title: section.title,
+        files: filesBySection[section.id] || [] // Get files for this section or empty array
+      }));
+    } else {
+      // Handle courses without sections (older courses)
+      // Fetch files directly linked to the course (where section_id might be NULL)
+      const [legacyFilesResult] = await db.query(
+        `SELECT id, file_id, original_name AS name 
+         FROM course_files 
+         WHERE course_id = ? AND section_id IS NULL 
+         ORDER BY order_index ASC`, // Assuming older files might have an order_index
+        [courseId]
+      );
+
+      if (legacyFilesResult.length > 0) {
+        const legacyFiles = legacyFilesResult.map(file => ({
+          id: file.id,
+          name: file.name,
+          url: `http://localhost:5003/api/courses/file/${file.file_id}`
+        }));
+        // Create a default section to hold these files
+        sections = [{
+          id: 'default-section',
+          title: 'Course Content',
+          files: legacyFiles
+        }];
+      }
+      // If no sections and no legacy files, sections remains an empty array []
+    }
 
     let progress = null;
     if (req.user && req.user.id) {
@@ -333,9 +500,8 @@ router.get("/:id", async (req, res) => {
       price: course.price,
       category: course.category,
       tutor: `${course.first_name} ${course.last_name}`,
-      pdfs,
-      videos,
-      playlistUrl: null,
+      sections: sections, // Use the structured sections array
+      playlistUrl: null, // Keep playlistUrl if it's used elsewhere, otherwise remove
       progress,
     });
   } catch (error) {
