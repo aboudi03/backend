@@ -1,4 +1,3 @@
-
 const express = require('express');
 const { registerTutor } = require('../Controllers/tutorController');
 const db = require("../db/db");
@@ -10,8 +9,21 @@ const router = express.Router();
 router.post('/', registerTutor);
 console.log("📁 tutorRoutes.js loaded");
 
+// 🔹 Middleware: Ensure tutor is approved
+const ensureApproved = async (req, res, next) => {
+  try {
+    const [[tutor]] = await db.query(`SELECT status FROM tutors WHERE user_id = ?`, [req.user.id]);
+    if (!tutor || tutor.status !== 'approved') {
+      return res.status(403).json({ message: "Your account is pending admin approval." });
+    }
+    next();
+  } catch (err) {
+    console.error("❌ Approval check failed:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
-// 🔹 GET: Get all tutors and their profile info
+// 🔹 GET: Get all approved tutors and their profile info
 router.get("/", async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -20,6 +32,7 @@ router.get("/", async (req, res) => {
         t.education, t.experience, t.subjects, t.other_subjects, t.certifications
       FROM tutors t
       JOIN users u ON t.user_id = u.id
+      WHERE t.status = 'approved'
     `);
 
     const tutors = rows.map((row) => {
@@ -41,7 +54,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get("/dashboard-stats", authenticate, async (req, res) => {
+// 🔹 GET: Dashboard stats (approved tutors only)
+router.get("/dashboard-stats", authenticate, ensureApproved, async (req, res) => {
   try {
     const tutorId = req.user.tutor_id;
 
@@ -89,8 +103,8 @@ router.get("/dashboard-stats", authenticate, async (req, res) => {
   }
 });
 
-
-router.get("/dashboard-activity", authenticate, async (req, res) => {
+// 🔹 GET: Dashboard activity (approved tutors only)
+router.get("/dashboard-activity", authenticate, ensureApproved, async (req, res) => {
   try {
     const tutorId = req.user.tutor_id;
 
