@@ -1,56 +1,78 @@
-const db = require('../db/db'); // Your database connection
+const pool = require("../db/db");   // mysql2/promise pool
 
-const loginAdmin = async (req, res) => {
-  console.log("== Debugging: Received admin login request ==");
-  
-  // Log the full request body to verify the values being sent
-  console.log("Request Body:", req.body);
+/* Helpers */
+const firstRow = (rows) => rows[0] || {};
 
-  // Destructure email and password from the request body
-  const { email, password } = req.body;
-
-  // Debug: Check if the expected fields are present
-  if (!email || !password) {
-    console.error("Missing email or password in the request.");
-    return res.status(400).json({ message: "Email and password are required." });
-  }
-
+exports.getStats = async (_, res) => {
   try {
-    console.log("Querying admins table for email:", email);
-    
-    // Execute the query to fetch the admin record using email
-    const adminSql = "SELECT * FROM admins WHERE email = ?";
-    const [adminResult] = await db.query(adminSql, [email]);
-    
-    // Debug: Log the result returned from the query
-    console.log("SQL query returned:", adminResult);
+    const [[{ totalUsers     }]] = await pool.query(`SELECT COUNT(*) AS totalUsers FROM users`);
+    const [[{ activeStudents }]] = await pool.query(`
+        SELECT COUNT(DISTINCT student_id) activeStudents
+        FROM   enrollments
+        WHERE  enrolled_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`);
+    const [[{ activeTutors   }]] = await pool.query(`
+        SELECT COUNT(*) activeTutors
+        FROM   tutors
+        WHERE  id IN (SELECT DISTINCT tutor_id FROM courses)`);
 
-    // If no record is found, log and return an error response
-    if (!adminResult || adminResult.length === 0) {
-      console.error("No admin found with email:", email);
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
+    // 🔧 Convert revenue to number safely (null fallback to 0)
+    const [[{ revenue }]] = await pool.query(`
+        SELECT COALESCE(SUM(c.price * 0.15), 0) AS revenue
+        FROM   enrollments e
+        JOIN   courses      c ON c.id = e.course_id
+    `);
 
-    // Retrieve the first matching admin record
-    const admin = adminResult[0];
-    console.log("Found admin record:", admin);
+    res.json({
+      totalUsers,
+      activeUsers: activeStudents + activeTutors,
+      activeSessions: 0,
+      countriesReached: 0,
+      revenue: Number(revenue).toFixed(2) // ✅ Fix: safely format as number
+    });
 
-    // Compare the provided password with the stored password (plain text)
-    if (admin.password !== password) {
-      console.error(`Password mismatch for email ${email}. Provided: "${password}", Stored: "${admin.password}"`);
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
-
-    // Debug: Confirm successful login
-    console.log("Admin login successful for email:", email);
-    
-    return res.json({ message: "Admin login successful" });
-  } catch (error) {
-    console.error("Error during admin login:", error);
-    return res.status(500).json({ message: "An error occurred during login." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
-module.exports = {
-  loginAdmin
+
+exports.getUsers = async (_, res) => {
+  const [rows] = await pool.query(`
+      SELECT u.id,
+             CONCAT(first_name,' ',last_name)   AS name,
+             email,
+             user_type                          AS role
+      FROM   users u
+      ORDER BY created_at DESC`);
+  res.json(rows);
 };
+
+exports.updateUser = async (req, res) => {
+  const { first_name, last_name, email, user_type } = req.body;
+  await pool.query(`UPDATE users SET first_name=?,last_name=?,email=?,user_type=?
+                    WHERE id=?`, [first_name,last_name,email,user_type,req.params.id]);
+  res.json({ message:"User updated" });
+};
+
+exports.deleteUser = async (req, res) => {
+  await pool.query(`DELETE FROM users WHERE id=?`, [req.params.id]);
+  res.json({ message:"User deleted" });
+};
+
+/* ─────  Tutors waiting for approval  ───── */
+exports.getPendingTutors = async (_, res) => {
+  const [rows] = await pool.query(`
+      SELECT t.id,
+             CONCAT(u.first_name,' ',u.last_name) AS name
+      FROM tutors t JOIN users u ON u.id = t.user_id
+      WHERE t.status='pending'`);
+  res.json(rows);
+};
+
+exports.acceptTutor  = async (req,res)=>changeTutorStatus(req,res,'approved');
+exports.declineTutor = async (req,res)=>changeTutorStatus(req,res,'declined');
+
+async function changeTutorStatus(req,res,status){
+  await pool.query(`UPDATE tutors SET status=? WHERE id=?`,[status,req.params.id]);
+  res.json({message:`Tutor ${status}`});
+}

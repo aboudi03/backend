@@ -1,9 +1,18 @@
-// src/routes/adminRoutes.js
-const express = require('express');
-const { loginAdmin } = require('../Controllers/adminController');
-const router = express.Router();
+const express = require("express");
+const router  = express.Router();
+const admin   = require("../controllers/adminController");
 
-// Define the POST /login route for admin login
-router.post('/login', loginAdmin);
+/* ─────  STATS  ───── */
+router.get("/stats",              admin.getStats);
+
+/* ─────  USERS  ───── */
+router.get   ("/users",           admin.getUsers);
+router.put   ("/users/:id",       admin.updateUser);
+router.delete("/users/:id",       admin.deleteUser);
+
+/* ── Pending tutor apps ── */
+router.get ("/tutor-applications",            admin.getPendingTutors);
+router.post("/tutor-applications/:id/accept", admin.acceptTutor);
+router.post("/tutor-applications/:id/decline",admin.declineTutor);
 
 module.exports = router;
