@@ -2,9 +2,11 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const db = require("../db/db");
 
-const JWT_SECRET_KEY = "mySuperSecretKey";
+const JWT_SECRET_KEY = "mySuperSecretKey"; // move to .env in production
 
-// Unified login for admin, tutor, and student
+// ─────────────────────────────
+// LOGIN for admin, tutor, student
+// ─────────────────────────────
 const login = async (req, res) => {
   const { email, password } = req.body;
 
@@ -13,7 +15,7 @@ const login = async (req, res) => {
   }
 
   try {
-    // 1️⃣ Check if user is an admin (plain text password)
+    // 1️⃣ Try admin login (plaintext password)
     const [adminRows] = await db.query("SELECT * FROM admins WHERE email = ?", [email]);
 
     if (adminRows.length > 0) {
@@ -25,8 +27,6 @@ const login = async (req, res) => {
             id: admin.id,
             email: admin.email,
             userType: "admin",
-            iat: Math.floor(Date.now() / 1000),
-            jti: Math.random().toString(36).substring(2),
           },
           JWT_SECRET_KEY,
           { expiresIn: "1h" }
@@ -34,7 +34,7 @@ const login = async (req, res) => {
 
         res.cookie("token", token, {
           httpOnly: true,
-          secure: false,
+          secure: false, // change to true on production/HTTPS
           sameSite: "Lax",
           maxAge: 60 * 60 * 1000,
         });
@@ -55,7 +55,7 @@ const login = async (req, res) => {
       }
     }
 
-    // 2️⃣ Check if user is a student or tutor (hashed password)
+    // 2️⃣ Try student/tutor login (users table with hashed passwords)
     const [userRows] = await db.query("SELECT * FROM users WHERE email = ?", [email]);
 
     if (userRows.length === 0) {
@@ -74,8 +74,6 @@ const login = async (req, res) => {
         id: user.id,
         email: user.email,
         userType: user.user_type,
-        iat: Math.floor(Date.now() / 1000),
-        jti: Math.random().toString(36).substring(2),
       },
       JWT_SECRET_KEY,
       { expiresIn: "1h" }
@@ -107,16 +105,18 @@ const login = async (req, res) => {
   }
 };
 
-// Logout by clearing the token cookie
+// ─────────────────────────────
+// LOGOUT (clear cookie)
+// ─────────────────────────────
 const logout = (req, res) => {
-  res.cookie("token", "", {
+  res.clearCookie("token", {
     httpOnly: true,
-    secure: false,
-    sameSite: "Strict",
-    expires: new Date(0),
+    secure: false, // ✅ must match how it was set during login
+    sameSite: "Lax", // ✅ must match as well
   });
 
   return res.status(200).json({ message: "Logout successful." });
 };
+
 
 module.exports = { login, logout };

@@ -514,9 +514,20 @@ router.get("/:id", async (req, res) => {
 router.get("/sessions", async (req, res) => {
   try {
     const [sessions] = await db.query(`
-      SELECT id, course_id, tutor_id, title, description, type, scheduled_at, duration_minutes
-      FROM course_sessions
-      ORDER BY scheduled_at ASC
+     SELECT 
+  cs.id,
+  cs.course_id,
+  cs.tutor_id,
+  cs.title,
+  cs.description,
+  cs.type,
+  cs.scheduled_at,
+  cs.duration_minutes,
+  c.title AS course_title
+FROM course_sessions cs
+JOIN courses c ON cs.course_id = c.id
+ORDER BY cs.scheduled_at ASC
+
     `);
 
     if (!Array.isArray(sessions)) {
