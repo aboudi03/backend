@@ -36,6 +36,9 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const roadmapRoutes = require("./routes/roadmapRoutes");
 const geminiRoutes = require("./routes/gemini");
+const paymentRoutes = require("./routes/paymentsRoutes");
+const earningsRoutes = require("./routes/earningsRoutes");
+
 
 // ✅ Register routes (only ONCE each)
 app.use("/api/auth", authRoutes);
@@ -47,9 +50,12 @@ app.use("/api/reviews", reviewsRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/admin", adminRoutes); // ✅ this is the correct position
+app.use("/api/admin", adminRoutes); 
 app.use("/api/roadmap", roadmapRoutes);
 app.use("/api/gemini", geminiRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/tutors", earningsRoutes);
+
 
 // ✅ Root welcome route
 app.get("/", (req, res) => {
