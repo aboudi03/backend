@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db/db");
 const { authenticate } = require("../middleware/authMiddleware");
+const { notifyTutor } = require("../utils/notificationHelper");
 
 const router = express.Router();
 
@@ -17,7 +18,9 @@ router.post("/enroll", authenticate, async (req, res) => {
     }
 
     // Check if course exists
-    const [course] = await db.query("SELECT * FROM courses WHERE id = ?", [course_id]);
+    const [course] = await db.query("SELECT * FROM courses WHERE id = ?", [
+      course_id,
+    ]);
     if (course.length === 0) {
       return res.status(404).json({ message: "Course not found." });
     }
@@ -29,7 +32,9 @@ router.post("/enroll", authenticate, async (req, res) => {
     );
 
     if (existing.length > 0) {
-      return res.status(400).json({ message: "Already enrolled in this course." });
+      return res
+        .status(400)
+        .json({ message: "Already enrolled in this course." });
     }
 
     // Enroll student
@@ -37,6 +42,9 @@ router.post("/enroll", authenticate, async (req, res) => {
       "INSERT INTO enrollments (student_id, course_id) VALUES (?, ?)",
       [student_id, course_id]
     );
+
+    // Send notification to the tutor
+    await notifyTutor(course_id, student_id);
 
     res.status(200).json({ message: "Enrollment successful!" });
   } catch (error) {
@@ -64,9 +72,11 @@ router.get("/my-courses", authenticate, async (req, res) => {
       [student_id]
     );
 
-    const coursesWithTutor = courses.map(course => ({
+    const coursesWithTutor = courses.map((course) => ({
       ...course,
-      tutor: `${course.tutor_first_name || ""} ${course.tutor_last_name || ""}`.trim(),
+      tutor: `${course.tutor_first_name || ""} ${
+        course.tutor_last_name || ""
+      }`.trim(),
     }));
 
     res.status(200).json(coursesWithTutor);
@@ -86,7 +96,9 @@ router.patch("/:courseId/progress", authenticate, async (req, res) => {
     const { progress } = req.body;
 
     if (typeof progress !== "number" || progress < 0 || progress > 100) {
-      return res.status(400).json({ message: "Progress must be between 0 and 100." });
+      return res
+        .status(400)
+        .json({ message: "Progress must be between 0 and 100." });
     }
 
     const [enrollment] = await db.query(
