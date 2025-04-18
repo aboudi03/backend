@@ -79,6 +79,33 @@ router.get("/", authenticate, ensureTutor, async (req, res) => { // Added authen
   }
 });
 
+// ────────────────────────────────────────────────────────────────────────────────
+// ✅ 1.1) GET: Fetch public courses (no auth required)
+// ────────────────────────────────────────────────────────────────────────────────
+router.get("/public", async (req, res) => {
+  try {
+    const { category } = req.query;
+    let sql = `
+      SELECT c.id, c.title, c.description, c.price, c.category,
+             t.user_id AS tutor_id, u.first_name, u.last_name
+      FROM courses c
+      JOIN tutors t ON c.tutor_id = t.id
+      JOIN users u ON t.user_id = u.id
+    `;
+    const params = [];
+
+    if (category) {
+      sql += " WHERE c.category = ?";
+      params.push(category.toLowerCase());
+    }
+
+    const [courses] = await db.query(sql, params);
+    res.status(200).json(courses);
+  } catch (error) {
+    console.error("❌ Error fetching public courses:", error);
+    res.status(500).json({ message: "Failed to fetch courses." });
+  }
+});
 
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 2) GET: Fetch all sessions/announcements (ARRAY of sessions)
