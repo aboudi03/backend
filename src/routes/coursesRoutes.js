@@ -6,7 +6,10 @@ const { authenticate } = require("../middleware/authMiddleware");
 const { ensureTutor } = require("../middleware/authTutor");
 const multer = require("multer");
 const { GridFSBucket } = require("mongodb");
-const { notifyAllStudents, notifyEnrolledStudents } = require("../utils/notificationHelper"); // 🔔 Import
+const {
+  notifyAllStudents,
+  notifyEnrolledStudents,
+} = require("../utils/notificationHelper"); // 🔔 Import
 require("dotenv").config();
 
 const router = express.Router();
@@ -24,7 +27,8 @@ const upload = multer({ storage });
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 1) GET: Fetch courses for the LOGGED-IN TUTOR (with PDFs if any)
 // ────────────────────────────────────────────────────────────────────────────────
-router.get("/", authenticate, ensureTutor, async (req, res) => { // Added authenticate and ensureTutor middleware
+router.get("/", authenticate, ensureTutor, async (req, res) => {
+  // Added authenticate and ensureTutor middleware
   try {
     const { category } = req.query;
     const userId = req.user.id; // Get user ID from authenticated session
@@ -170,7 +174,13 @@ router.post(
     console.log("Received Files:", req.files); // Log files
     try {
       // Destructure basic course info and the new sections structure
-      const { title, description, price, category, sections: sectionsJson } = req.body;
+      const {
+        title,
+        description,
+        price,
+        category,
+        sections: sectionsJson,
+      } = req.body;
       const files = req.files; // All uploaded files are in req.files
 
       if (
@@ -245,14 +255,16 @@ router.post(
             // Store file with its original index for ordering
             filesBySection[sectionIndex][fileIndex] = file;
           } else {
-            console.warn(`Skipping file with unexpected fieldname: ${file.fieldname}`);
+            console.warn(
+              `Skipping file with unexpected fieldname: ${file.fieldname}`
+            );
           }
         }
         console.log("Files Organized by Section:", filesBySection); // Log organized files
 
         for (const [sectionIndex, sectionData] of sections.entries()) {
           console.log(`Processing Section ${sectionIndex}:`, sectionData); // Log section being processed
-          if (!sectionData.name || typeof sectionData.fileCount !== 'number') {
+          if (!sectionData.name || typeof sectionData.fileCount !== "number") {
             throw new Error(`Invalid data for section ${sectionIndex}.`);
           }
 
@@ -264,12 +276,20 @@ router.post(
           const sectionId = sectionResult.insertId;
 
           // Process files for this section using the organized structure
-          const sectionFiles = (filesBySection[sectionIndex] || []).filter(f => f); // Get files for this section, filter out empty slots if any
-          console.log(`Section ${sectionIndex} - Parsed Files Count: ${sectionFiles.length}, Expected Count (from body): ${sectionData.fileCount}`); // Log counts before check
+          const sectionFiles = (filesBySection[sectionIndex] || []).filter(
+            (f) => f
+          ); // Get files for this section, filter out empty slots if any
+          console.log(
+            `Section ${sectionIndex} - Parsed Files Count: ${sectionFiles.length}, Expected Count (from body): ${sectionData.fileCount}`
+          ); // Log counts before check
 
           if (sectionFiles.length !== sectionData.fileCount) {
-            console.error(`File count mismatch error for section ${sectionIndex}. Expected ${sectionData.fileCount}, got ${sectionFiles.length}.`); // Log mismatch error
-            throw new Error(`File count mismatch for section ${sectionIndex}. Expected ${sectionData.fileCount}, got ${sectionFiles.length}. Check backend file parsing logic.`);
+            console.error(
+              `File count mismatch error for section ${sectionIndex}. Expected ${sectionData.fileCount}, got ${sectionFiles.length}.`
+            ); // Log mismatch error
+            throw new Error(
+              `File count mismatch for section ${sectionIndex}. Expected ${sectionData.fileCount}, got ${sectionFiles.length}. Check backend file parsing logic.`
+            );
           }
 
           // Sort files by their original index to maintain order
@@ -279,11 +299,15 @@ router.post(
           //   return indexA - indexB;
           // });
 
-          const uploadPromises = sectionFiles.map((file, fileIndex) => { // fileIndex here is the index within the sorted sectionFiles array
+          const uploadPromises = sectionFiles.map((file, fileIndex) => {
+            // fileIndex here is the index within the sorted sectionFiles array
             return new Promise((resolve, reject) => {
-              const uploadStream = gfsBucket.openUploadStream(file.originalname, {
-                contentType: file.mimetype,
-              });
+              const uploadStream = gfsBucket.openUploadStream(
+                file.originalname,
+                {
+                  contentType: file.mimetype,
+                }
+              );
 
               uploadStream.end(file.buffer);
 
@@ -291,26 +315,45 @@ router.post(
                 try {
                   const fileId = uploadStream.id.toString();
                   // Determine file type (e.g., from mimetype or keep simple 'file')
-                  const fileType = file.mimetype.startsWith("video") ? "video" : (file.mimetype === 'application/pdf' ? 'pdf' : 'other');
-                  console.log(`DB Insert course_files: courseId=${courseId}, sectionId=${sectionId}, fileId=${fileId}, type=${fileType}, order=${fileIndex}, name=${file.originalname}`); // Log DB insert details
+                  const fileType = file.mimetype.startsWith("video")
+                    ? "video"
+                    : file.mimetype === "application/pdf"
+                    ? "pdf"
+                    : "other";
+                  console.log(
+                    `DB Insert course_files: courseId=${courseId}, sectionId=${sectionId}, fileId=${fileId}, type=${fileType}, order=${fileIndex}, name=${file.originalname}`
+                  ); // Log DB insert details
 
                   // Insert into course_files, linking to the section
                   // You'll need to add `section_id` and `order_index` columns to `course_files` table and make `type` more generic or remove it if storing in sections.
                   // ALTER TABLE course_files ADD COLUMN section_id INT NULL, ADD COLUMN order_index INT NULL, ADD CONSTRAINT fk_section FOREIGN KEY (section_id) REFERENCES course_sections(id);
                   await connection.query(
                     "INSERT INTO course_files (course_id, section_id, file_id, type, order_index, original_name) VALUES (?, ?, ?, ?, ?, ?)",
-                    [courseId, sectionId, fileId, fileType, fileIndex, file.originalname] // Store original name
+                    [
+                      courseId,
+                      sectionId,
+                      fileId,
+                      fileType,
+                      fileIndex,
+                      file.originalname,
+                    ] // Store original name
                   );
                   resolve();
                 } catch (dbError) {
-                  console.error(`❌ DB Error inserting file record for ${file.originalname}:`, dbError); // Log DB error
+                  console.error(
+                    `❌ DB Error inserting file record for ${file.originalname}:`,
+                    dbError
+                  ); // Log DB error
                   reject(dbError);
                 }
               });
 
               uploadStream.on("error", (uploadError) => {
-                 console.error(`❌ Error uploading file ${file.originalname} to GridFS:`, uploadError);
-                 reject(uploadError);
+                console.error(
+                  `❌ Error uploading file ${file.originalname} to GridFS:`,
+                  uploadError
+                );
+                reject(uploadError);
               });
             });
           });
@@ -323,25 +366,35 @@ router.post(
         console.log(`✅ Course ${courseId} committed successfully.`); // Log commit
 
         // 🔔 Notify after successful commit
-        await notifyAllStudents(`A new course "${title}" has been added.`, "new_course");
+        await notifyAllStudents(
+          `A new course "${title}" has been added.`,
+          "new_course"
+        );
 
-        res.status(201).json({ message: "Course added successfully.", courseId });
+        res
+          .status(201)
+          .json({ message: "Course added successfully.", courseId });
       } catch (error) {
         // Rollback transaction on error
         await connection.rollback();
-        console.error("❌ Error during course creation transaction (rolled back):", error); // Log transaction error
+        console.error(
+          "❌ Error during course creation transaction (rolled back):",
+          error
+        ); // Log transaction error
         // Clean up potentially uploaded GridFS files if needed (more complex)
-        res.status(500).json({ message: "Failed to add course.", error: error.message });
-      }
-      finally {
+        res
+          .status(500)
+          .json({ message: "Failed to add course.", error: error.message });
+      } finally {
         connection.release(); // Release connection back to the pool
         console.log("--- Add Course Request End (Transaction Finished) ---"); // Log end
       }
-
     } catch (error) {
       // Catch errors before transaction starts
       console.error("❌ Error adding course (before transaction):", error); // Log pre-transaction error
-      res.status(500).json({ message: "Failed to add course.", error: error.message });
+      res
+        .status(500)
+        .json({ message: "Failed to add course.", error: error.message });
       console.log("--- Add Course Request End (Error Before Transaction) ---"); // Log end
     }
   }
@@ -350,58 +403,69 @@ router.post(
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 5) POST: Add a live session or announcement to a course
 // ────────────────────────────────────────────────────────────────────────────────
-router.post("/:courseId/sessions", authenticate, ensureTutor, async (req, res) => {
-  try {
-    const { courseId } = req.params;
-    const { title, description, type, scheduled_at, visibility } = req.body;
-    const duration = 60; // default if not provided
-    const userId = req.user.id;
+router.post(
+  "/:courseId/sessions",
+  authenticate,
+  ensureTutor,
+  async (req, res) => {
+    try {
+      const { courseId } = req.params;
+      const { title, description, type, scheduled_at, visibility } = req.body;
+      const duration = 60; // default if not provided
+      const userId = req.user.id;
 
-    if (!title || !type || !scheduled_at) {
-      return res
-        .status(400)
-        .json({ message: "Title, type, and scheduled time are required." });
-    }
+      if (!title || !type || !scheduled_at) {
+        return res
+          .status(400)
+          .json({ message: "Title, type, and scheduled time are required." });
+      }
 
-    // Check ownership
-    const [courseCheck] = await db.query(
-      "SELECT * FROM courses WHERE id = ? AND tutor_id = (SELECT id FROM tutors WHERE user_id = ?)",
-      [courseId, userId]
-    );
+      // Check ownership
+      const [courseCheck] = await db.query(
+        "SELECT * FROM courses WHERE id = ? AND tutor_id = (SELECT id FROM tutors WHERE user_id = ?)",
+        [courseId, userId]
+      );
 
-    if (courseCheck.length === 0) {
-      return res
-        .status(403)
-        .json({ message: "Unauthorized or course not found." });
-    }
+      if (courseCheck.length === 0) {
+        return res
+          .status(403)
+          .json({ message: "Unauthorized or course not found." });
+      }
 
-    // Insert session/announcement
-    await db.query(
-      `INSERT INTO course_sessions (course_id, tutor_id, title, description, type, scheduled_at, duration_minutes, visibility)
+      // Insert session/announcement
+      await db.query(
+        `INSERT INTO course_sessions (course_id, tutor_id, title, description, type, scheduled_at, duration_minutes, visibility)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [courseId, courseCheck[0].tutor_id, title, description, type, scheduled_at, duration, visibility || 'private']
-    );
-       // 🔔 Notify enrolled students
-       const sessionMessage =
-       type === "announcement"
-         ? `New announcement posted: "${title}"`
-         : `Live session scheduled: "${title}"`;
- 
- 
- 
-    console.log("📢 Calling notifyEnrolledStudents for course:", courseId);
- 
- 
- 
- 
-     await notifyEnrolledStudents(courseId, sessionMessage, type);
+        [
+          courseId,
+          courseCheck[0].tutor_id,
+          title,
+          description,
+          type,
+          scheduled_at,
+          duration,
+          visibility || "private",
+        ]
+      );
+      // 🔔 Notify enrolled students
+      const sessionMessage =
+        type === "announcement"
+          ? `New announcement posted: "${title}"`
+          : `Live session scheduled: "${title}"`;
 
-    res.status(201).json({ message: "Session/announcement created successfully!" });
-  } catch (err) {
-    console.error("❌ Error creating session:", err);
-    res.status(500).json({ message: "Server error." });
+      console.log("📢 Calling notifyEnrolledStudents for course:", courseId);
+
+      await notifyEnrolledStudents(courseId, sessionMessage, type);
+
+      res
+        .status(201)
+        .json({ message: "Session/announcement created successfully!" });
+    } catch (err) {
+      console.error("❌ Error creating session:", err);
+      res.status(500).json({ message: "Server error." });
+    }
   }
-});
+);
 
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 6) GET: Fetch a single file (PDF/Video) from MongoDB
@@ -467,7 +531,7 @@ router.get("/:id", async (req, res) => {
       acc[sectionId].push({
         id: file.id, // Use course_files primary key if needed, or file_id
         name: file.name,
-        url: `http://localhost:5003/api/courses/file/${file.file_id}` // Construct URL
+        url: `http://localhost:5003/api/courses/file/${file.file_id}`, // Construct URL
       });
       return acc;
     }, {});
@@ -484,16 +548,16 @@ router.get("/:id", async (req, res) => {
         acc[sectionId].push({
           id: file.id, // Use course_files primary key if needed, or file_id
           name: file.name,
-          url: `http://localhost:5003/api/courses/file/${file.file_id}` // Construct URL
+          url: `http://localhost:5003/api/courses/file/${file.file_id}`, // Construct URL
         });
         return acc;
       }, {});
 
       // Map sections and attach their files
-      sections = sectionsResult.map(section => ({
+      sections = sectionsResult.map((section) => ({
         id: section.id,
         title: section.title,
-        files: filesBySection[section.id] || [] // Get files for this section or empty array
+        files: filesBySection[section.id] || [], // Get files for this section or empty array
       }));
     } else {
       // Handle courses without sections (older courses)
@@ -507,17 +571,19 @@ router.get("/:id", async (req, res) => {
       );
 
       if (legacyFilesResult.length > 0) {
-        const legacyFiles = legacyFilesResult.map(file => ({
+        const legacyFiles = legacyFilesResult.map((file) => ({
           id: file.id,
           name: file.name,
-          url: `http://localhost:5003/api/courses/file/${file.file_id}`
+          url: `http://localhost:5003/api/courses/file/${file.file_id}`,
         }));
         // Create a default section to hold these files
-        sections = [{
-          id: 'default-section',
-          title: 'Course Content',
-          files: legacyFiles
-        }];
+        sections = [
+          {
+            id: "default-section",
+            title: "Course Content",
+            files: legacyFiles,
+          },
+        ];
       }
       // If no sections and no legacy files, sections remains an empty array []
     }
@@ -579,7 +645,9 @@ ORDER BY cs.scheduled_at ASC
     res.status(200).json(sessions);
   } catch (error) {
     console.error("❌ Error fetching sessions:", error);
-    res.status(500).json({ message: "Failed to fetch sessions from the database." });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch sessions from the database." });
   }
 });
 
@@ -588,13 +656,16 @@ router.get("/student/schedule", authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const [sessions] = await db.query(`
+    const [sessions] = await db.query(
+      `
       SELECT cs.id, cs.course_id, cs.tutor_id, cs.title, cs.description, cs.type, cs.scheduled_at, cs.duration_minutes
       FROM course_sessions cs
       JOIN enrollments e ON cs.course_id = e.course_id
       WHERE e.student_id = ?
       ORDER BY cs.scheduled_at ASC
-    `, [userId]);
+    `,
+      [userId]
+    );
 
     res.status(200).json(sessions);
   } catch (err) {
@@ -616,7 +687,9 @@ router.delete("/:id", authenticate, ensureTutor, async (req, res) => {
     );
 
     if (check.length === 0) {
-      return res.status(403).json({ message: "Not authorized or course not found." });
+      return res
+        .status(403)
+        .json({ message: "Not authorized or course not found." });
     }
 
     // Delete course (and cascade to related tables via FK constraints)
@@ -629,7 +702,7 @@ router.delete("/:id", authenticate, ensureTutor, async (req, res) => {
   }
 });
 
-// ✅ GET: Fetch all public announcements 
+// ✅ GET: Fetch all public announcements
 router.get("/announcements/public", async (req, res) => {
   try {
     const [announcements] = await db.query(`
@@ -648,6 +721,246 @@ router.get("/announcements/public", async (req, res) => {
   }
 });
 
+// ✅ PUT: Update a course by tutor
+router.put(
+  "/:id",
+  authenticate,
+  ensureTutor,
+  upload.any(),
+  async (req, res) => {
+    const courseId = req.params.id;
+    const userId = req.user.id;
 
+    console.log("--- Update Course Request Start ---");
+    console.log("Received Body:", req.body);
+    console.log("Received Files:", req.files);
+
+    try {
+      // Destructure course data
+      const {
+        title,
+        description,
+        price,
+        category,
+        sections: sectionsJson,
+        removedFiles,
+      } = req.body;
+      const files = req.files || [];
+      let removedFilesArray = [];
+
+      if (removedFiles) {
+        try {
+          removedFilesArray = JSON.parse(removedFiles);
+        } catch (e) {
+          console.error("Error parsing removedFiles:", e);
+        }
+      }
+
+      // Check if this course belongs to the authenticated tutor
+      const [tutorRows] = await db.query(
+        "SELECT id FROM tutors WHERE user_id = ?",
+        [userId]
+      );
+      if (tutorRows.length === 0) {
+        return res.status(403).json({ message: "Tutor profile not found." });
+      }
+      const tutorId = tutorRows[0].id;
+
+      const [check] = await db.query(
+        `SELECT * FROM courses 
+       WHERE id = ? AND tutor_id = ?`,
+        [courseId, tutorId]
+      );
+
+      if (check.length === 0) {
+        return res
+          .status(403)
+          .json({ message: "Not authorized or course not found." });
+      }
+
+      // Start a transaction
+      const connection = await db.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        // 1. Update basic course info
+        await connection.query(
+          "UPDATE courses SET title = ?, description = ?, price = ?, category = ? WHERE id = ?",
+          [
+            title,
+            description,
+            parseFloat(price),
+            category.toLowerCase(),
+            courseId,
+          ]
+        );
+
+        // 2. Process sections from JSON
+        let sections = [];
+        if (sectionsJson) {
+          try {
+            sections = JSON.parse(sectionsJson);
+            console.log("Parsed Sections:", sections);
+            if (!Array.isArray(sections)) {
+              throw new Error("Invalid sections format.");
+            }
+          } catch (e) {
+            await connection.rollback();
+            connection.release();
+            return res
+              .status(400)
+              .json({ message: "Invalid sections JSON data." });
+          }
+        }
+
+        // 3. Delete removed files if any
+        if (removedFilesArray.length > 0) {
+          for (const fileId of removedFilesArray) {
+            // Get the GridFS file_id before deleting the record
+            const [fileRecord] = await connection.query(
+              "SELECT file_id FROM course_files WHERE id = ?",
+              [fileId]
+            );
+
+            if (fileRecord.length > 0) {
+              const gridFsFileId = fileRecord[0].file_id;
+
+              // Delete from course_files table
+              await connection.query("DELETE FROM course_files WHERE id = ?", [
+                fileId,
+              ]);
+
+              // Delete from GridFS
+              try {
+                const objectId = new mongoose.Types.ObjectId(gridFsFileId);
+                gfsBucket.delete(objectId);
+              } catch (err) {
+                console.error(`Error deleting file from GridFS: ${err}`);
+                // Continue even if GridFS deletion fails
+              }
+            }
+          }
+        }
+
+        // 4. Process section updates
+        for (const [sectionIndex, sectionData] of sections.entries()) {
+          if (sectionData.id && !sectionData.isNew) {
+            // Update existing section
+            await connection.query(
+              "UPDATE course_sections SET name = ?, order_index = ? WHERE id = ?",
+              [sectionData.name, sectionIndex, sectionData.id]
+            );
+          } else {
+            // Create new section
+            const [sectionResult] = await connection.query(
+              "INSERT INTO course_sections (course_id, name, order_index) VALUES (?, ?, ?)",
+              [courseId, sectionData.name, sectionIndex]
+            );
+            sectionData.id = sectionResult.insertId;
+          }
+        }
+
+        // 5. Process new file uploads
+        const filesBySection = {};
+        for (const file of files) {
+          const match = file.fieldname.match(/^section_(\d+)_file_(\d+)$/);
+          if (match) {
+            const sectionIndex = parseInt(match[1], 10);
+            const fileIndex = parseInt(match[2], 10);
+            if (!filesBySection[sectionIndex]) {
+              filesBySection[sectionIndex] = [];
+            }
+            filesBySection[sectionIndex][fileIndex] = file;
+          }
+        }
+
+        // Upload new files for each section
+        for (const [sectionIndex, sectionFiles] of Object.entries(
+          filesBySection
+        )) {
+          const sectionId = sections[sectionIndex].id;
+
+          const uploadPromises = sectionFiles
+            .filter((f) => f)
+            .map((file, fileIndex) => {
+              return new Promise((resolve, reject) => {
+                const uploadStream = gfsBucket.openUploadStream(
+                  file.originalname,
+                  {
+                    contentType: file.mimetype,
+                  }
+                );
+
+                uploadStream.end(file.buffer);
+
+                uploadStream.on("finish", async () => {
+                  try {
+                    const fileId = uploadStream.id.toString();
+                    const fileType = file.mimetype.startsWith("video")
+                      ? "video"
+                      : file.mimetype === "application/pdf"
+                      ? "pdf"
+                      : "other";
+
+                    await connection.query(
+                      "INSERT INTO course_files (course_id, section_id, file_id, type, order_index, original_name) VALUES (?, ?, ?, ?, ?, ?)",
+                      [
+                        courseId,
+                        sectionId,
+                        fileId,
+                        fileType,
+                        fileIndex,
+                        file.originalname,
+                      ]
+                    );
+                    resolve();
+                  } catch (dbError) {
+                    console.error(`DB Error inserting file record: ${dbError}`);
+                    reject(dbError);
+                  }
+                });
+
+                uploadStream.on("error", (uploadError) => {
+                  console.error(
+                    `Error uploading file to GridFS: ${uploadError}`
+                  );
+                  reject(uploadError);
+                });
+              });
+            });
+
+          await Promise.all(uploadPromises);
+        }
+
+        // Commit the transaction
+        await connection.commit();
+        console.log(`Course ${courseId} updated successfully.`);
+
+        // 6. Notify enrolled students about the course update
+        await notifyEnrolledStudents(
+          courseId,
+          `Course "${title}" has been updated.`,
+          "course_update"
+        );
+
+        res.status(200).json({ message: "Course updated successfully." });
+      } catch (error) {
+        await connection.rollback();
+        console.error("Error during course update transaction:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to update course.", error: error.message });
+      } finally {
+        connection.release();
+        console.log("--- Update Course Request End ---");
+      }
+    } catch (error) {
+      console.error("Error updating course:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to update course.", error: error.message });
+    }
+  }
+);
 
 module.exports = router;
