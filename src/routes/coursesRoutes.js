@@ -22,11 +22,23 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // ────────────────────────────────────────────────────────────────────────────────
-// ✅ 1) GET: Fetch all courses (with PDFs if any)
+// ✅ 1) GET: Fetch courses for the LOGGED-IN TUTOR (with PDFs if any)
 // ────────────────────────────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+router.get("/", authenticate, ensureTutor, async (req, res) => { // Added authenticate and ensureTutor middleware
   try {
     const { category } = req.query;
+    const userId = req.user.id; // Get user ID from authenticated session
+
+    // Find the tutor ID associated with the user ID
+    const [tutorRows] = await db.query(
+      "SELECT id FROM tutors WHERE user_id = ?",
+      [userId]
+    );
+
+    if (tutorRows.length === 0) {
+      return res.status(403).json({ message: "Tutor profile not found." });
+    }
+    const tutorId = tutorRows[0].id;
 
     let sql = `
       SELECT c.id, c.title, c.description, c.price, c.category,
@@ -34,11 +46,12 @@ router.get("/", async (req, res) => {
       FROM courses c
       JOIN tutors t ON c.tutor_id = t.id
       JOIN users u ON t.user_id = u.id
+      WHERE c.tutor_id = ? -- Filter by the logged-in tutor's ID
     `;
-    const params = [];
+    const params = [tutorId]; // Start params with tutorId
 
     if (category) {
-      sql += " WHERE c.category = ?";
+      sql += " AND c.category = ?"; // Add category filter with AND
       params.push(category.toLowerCase());
     }
 
