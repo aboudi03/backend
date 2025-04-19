@@ -38,7 +38,7 @@ const roadmapRoutes = require("./routes/roadmapRoutes");
 const geminiRoutes = require("./routes/gemini");
 const paymentRoutes = require("./routes/paymentsRoutes");
 const earningsRoutes = require("./routes/earningsRoutes");
-
+const quizRoutes = require("./routes/quizRoutes");
 
 // ✅ Register routes (only ONCE each)
 app.use("/api/auth", authRoutes);
@@ -55,7 +55,7 @@ app.use("/api/roadmap", roadmapRoutes);
 app.use("/api/gemini", geminiRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/tutors", earningsRoutes);
-
+app.use("/api/quiz", quizRoutes);
 
 // ✅ Root welcome route
 app.get("/", (req, res) => {
