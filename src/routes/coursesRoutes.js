@@ -486,7 +486,7 @@ router.get("/file/:fileId", async (req, res) => {
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 7) GET: Fetch single course detail (+ PDFs/videos) by :id
 // ────────────────────────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+router.get("/:id", authenticate, async (req, res) => {
   const courseId = req.params.id;
   try {
     const courseSql = `
@@ -504,7 +504,6 @@ router.get("/:id", async (req, res) => {
 
     const course = results[0];
 
-    // Fetch sections for the course, ordered
     const [sectionsResult] = await db.query(
       `SELECT id, name AS title, order_index 
        FROM course_sections 
@@ -513,7 +512,6 @@ router.get("/:id", async (req, res) => {
       [courseId]
     );
 
-    // Fetch all files for the course once
     const [allFilesResult] = await db.query(
       `SELECT id, section_id, file_id, original_name AS name, order_index 
        FROM course_files 
@@ -522,51 +520,30 @@ router.get("/:id", async (req, res) => {
       [courseId]
     );
 
-    // Group files by section_id
     const filesBySection = allFilesResult.reduce((acc, file) => {
       const sectionId = file.section_id;
-      if (!acc[sectionId]) {
-        acc[sectionId] = [];
-      }
+      if (!acc[sectionId]) acc[sectionId] = [];
       acc[sectionId].push({
-        id: file.id, // Use course_files primary key if needed, or file_id
+        id: file.id,
         name: file.name,
-        url: `http://localhost:5003/api/courses/file/${file.file_id}`, // Construct URL
+        url: `http://localhost:5003/api/courses/file/${file.file_id}`,
       });
       return acc;
     }, {});
 
     let sections = [];
-    // Check if sections exist for the course
     if (sectionsResult.length > 0) {
-      // Group files by section_id
-      const filesBySection = allFilesResult.reduce((acc, file) => {
-        const sectionId = file.section_id;
-        if (!acc[sectionId]) {
-          acc[sectionId] = [];
-        }
-        acc[sectionId].push({
-          id: file.id, // Use course_files primary key if needed, or file_id
-          name: file.name,
-          url: `http://localhost:5003/api/courses/file/${file.file_id}`, // Construct URL
-        });
-        return acc;
-      }, {});
-
-      // Map sections and attach their files
       sections = sectionsResult.map((section) => ({
         id: section.id,
         title: section.title,
-        files: filesBySection[section.id] || [], // Get files for this section or empty array
+        files: filesBySection[section.id] || [],
       }));
     } else {
-      // Handle courses without sections (older courses)
-      // Fetch files directly linked to the course (where section_id might be NULL)
       const [legacyFilesResult] = await db.query(
         `SELECT id, file_id, original_name AS name 
          FROM course_files 
          WHERE course_id = ? AND section_id IS NULL 
-         ORDER BY order_index ASC`, // Assuming older files might have an order_index
+         ORDER BY order_index ASC`,
         [courseId]
       );
 
@@ -576,7 +553,6 @@ router.get("/:id", async (req, res) => {
           name: file.name,
           url: `http://localhost:5003/api/courses/file/${file.file_id}`,
         }));
-        // Create a default section to hold these files
         sections = [
           {
             id: "default-section",
@@ -585,18 +561,29 @@ router.get("/:id", async (req, res) => {
           },
         ];
       }
-      // If no sections and no legacy files, sections remains an empty array []
     }
 
     let progress = null;
+    let passedChapters = [];
+
     if (req.user && req.user.id) {
+      const studentId = req.user.id;
+
       const [enrollment] = await db.query(
         "SELECT progress FROM enrollments WHERE student_id = ? AND course_id = ?",
-        [req.user.id, courseId]
+        [studentId, courseId]
       );
       if (enrollment.length > 0) {
         progress = enrollment[0].progress;
       }
+
+      // 🔥 Fetch passed chapters
+      const [passedRows] = await db.query(
+        `SELECT chapter_id FROM quiz_results 
+         WHERE student_id = ? AND score >= 60`,
+        [studentId]
+      );
+      passedChapters = passedRows.map((r) => r.chapter_id);
     }
 
     res.status(200).json({
@@ -606,15 +593,17 @@ router.get("/:id", async (req, res) => {
       price: course.price,
       category: course.category,
       tutor: `${course.first_name} ${course.last_name}`,
-      sections: sections, // Use the structured sections array
-      playlistUrl: null, // Keep playlistUrl if it's used elsewhere, otherwise remove
+      sections,
+      playlistUrl: null,
       progress,
+      passedChapters, // ✅ now included
     });
   } catch (error) {
     console.error("❌ Error fetching course detail:", error);
     res.status(500).json({ message: "Failed to fetch course details." });
   }
 });
+
 
 // ✅ GET: Fetch all sessions or announcements (for calendar display)
 router.get("/sessions", async (req, res) => {

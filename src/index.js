@@ -39,7 +39,8 @@ const geminiRoutes = require("./routes/gemini");
 const paymentRoutes = require("./routes/paymentsRoutes");
 const earningsRoutes = require("./routes/earningsRoutes");
 const quizRoutes = require("./routes/quizRoutes");
-
+const finalQuizRoutes=require("./routes/finalQuizRoutes");
+const certificatesRoutes=require("./routes/certificatesRoutes");
 
 // ✅ Register routes (only ONCE each)
 app.use("/api/auth", authRoutes);
@@ -57,6 +58,11 @@ app.use("/api/gemini", geminiRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/tutors", earningsRoutes);
 app.use("/api/quiz", quizRoutes);
+app.use("/api/final-quiz", finalQuizRoutes);
+app.use("/api/certificates", certificatesRoutes);
+
+
+
 
 
 // ✅ Root welcome route
