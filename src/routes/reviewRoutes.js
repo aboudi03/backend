@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db/db");
 const { authenticate } = require("../middleware/authMiddleware");
+const { notifyTutor } = require("../utils/notificationHelper"); // Import notification helper
 
 const router = express.Router();
 
@@ -12,11 +13,18 @@ router.post("/", authenticate, async (req, res) => {
     const { course_id, rating, review } = req.body;
     const student_id = req.user.id;
 
-    console.log("🟡 Received Review:", { student_id, course_id, rating, review });
+    console.log("🟡 Received Review:", {
+      student_id,
+      course_id,
+      rating,
+      review,
+    });
 
     // ✅ Validate inputs
     if (!course_id || !rating || rating < 1 || rating > 5) {
-      return res.status(400).json({ message: "Invalid rating or missing fields." });
+      return res
+        .status(400)
+        .json({ message: "Invalid rating or missing fields." });
     }
 
     // ✅ Ensure student is enrolled in the course
@@ -26,17 +34,23 @@ router.post("/", authenticate, async (req, res) => {
     );
 
     if (enrollment.length === 0) {
-      return res.status(403).json({ message: "You cannot review a course you haven't taken." });
+      return res
+        .status(403)
+        .json({ message: "You cannot review a course you haven't taken." });
     }
 
     // ✅ Fetch `tutor_id` from courses table
-    const [course] = await db.query("SELECT tutor_id FROM courses WHERE id = ?", [course_id]);
+    const [course] = await db.query(
+      "SELECT tutor_id, title FROM courses WHERE id = ?",
+      [course_id]
+    );
 
     if (course.length === 0) {
       return res.status(404).json({ message: "Course not found." });
     }
 
     const tutor_id = course[0].tutor_id;
+    const courseTitle = course[0].title;
 
     console.log("🎯 Submitting review for tutor:", tutor_id);
 
@@ -45,8 +59,21 @@ router.post("/", authenticate, async (req, res) => {
       "INSERT INTO reviews (student_id, tutor_id, course_id, rating, review) VALUES (?, ?, ?, ?, ?)",
       [student_id, tutor_id, course_id, rating, review]
     );
-    
-    
+
+    // ✅ Get student name to include in notification
+    const [student] = await db.query(
+      "SELECT first_name, last_name FROM users WHERE id = ?",
+      [student_id]
+    );
+
+    if (student.length > 0) {
+      const studentName = `${student[0].first_name} ${student[0].last_name}`;
+      const message = `${studentName} has submitted a ${rating}-star review for your course "${courseTitle}"`;
+
+      // Send notification to tutor about the new review
+      await notifyTutor(course_id, student_id, message, "review");
+      console.log("🔔 Notification sent to tutor about new review");
+    }
 
     res.status(201).json({ message: "Review submitted successfully!" });
   } catch (error) {
@@ -55,29 +82,30 @@ router.post("/", authenticate, async (req, res) => {
   }
 });
 
-
 /**
  * 🔹 GET: Fetch all reviews for a specific tutor
  */
 router.get("/tutor", authenticate, async (req, res) => {
-    try {
-      const user_id = req.user.id;
-      console.log("🔍 Fetching tutor info for user_id:", user_id);
-  
-      // ✅ Fetch tutor_id from the tutors table
-      const [tutor] = await db.query("SELECT id FROM tutors WHERE user_id = ?", [user_id]);
-  
-      if (tutor.length === 0) {
-        console.log("❌ Tutor not found for user_id:", user_id);
-        return res.status(404).json({ message: "Tutor not found" });
-      }
-  
-      const tutorId = tutor[0].id;
-      console.log("✅ Found tutor_id:", tutorId);
-  
-      // ✅ Fetch reviews (Fix: Get student details from users table)
-      const [reviews] = await db.query(
-        `SELECT r.rating, r.review, r.created_at, 
+  try {
+    const user_id = req.user.id;
+    console.log("🔍 Fetching tutor info for user_id:", user_id);
+
+    // ✅ Fetch tutor_id from the tutors table
+    const [tutor] = await db.query("SELECT id FROM tutors WHERE user_id = ?", [
+      user_id,
+    ]);
+
+    if (tutor.length === 0) {
+      console.log("❌ Tutor not found for user_id:", user_id);
+      return res.status(404).json({ message: "Tutor not found" });
+    }
+
+    const tutorId = tutor[0].id;
+    console.log("✅ Found tutor_id:", tutorId);
+
+    // ✅ Fetch reviews (Fix: Get student details from users table)
+    const [reviews] = await db.query(
+      `SELECT r.rating, r.review, r.created_at, 
                 u.first_name AS student_first_name, u.last_name AS student_last_name, 
                 c.title AS course_title
          FROM reviews r
@@ -85,20 +113,16 @@ router.get("/tutor", authenticate, async (req, res) => {
          JOIN users u ON s.user_id = u.id  -- Fix: Fetch student names from users table
          JOIN courses c ON r.course_id = c.id
          WHERE r.tutor_id = ?`,
-        [tutorId]
-      );
-  
-      console.log("📤 Sending Reviews:", reviews);
-      res.status(200).json(reviews);
-    } catch (error) {
-      console.error("❌ Error fetching tutor reviews:", error);
-      res.status(500).json({ message: "Server error." });
-    }
-  });
-  
-  
-  
-  
+      [tutorId]
+    );
+
+    console.log("📤 Sending Reviews:", reviews);
+    res.status(200).json(reviews);
+  } catch (error) {
+    console.error("❌ Error fetching tutor reviews:", error);
+    res.status(500).json({ message: "Server error." });
+  }
+});
 
 /**
  * 🔹 GET: Fetch all reviews written by a specific student
@@ -158,13 +182,15 @@ router.delete("/:reviewId", authenticate, async (req, res) => {
     const student_id = req.user.id;
 
     // ✅ Ensure the review belongs to the student
-    const [review] = await db.query("SELECT * FROM reviews WHERE id = ? AND student_id = ?", [
-      reviewId,
-      student_id,
-    ]);
+    const [review] = await db.query(
+      "SELECT * FROM reviews WHERE id = ? AND student_id = ?",
+      [reviewId, student_id]
+    );
 
     if (review.length === 0) {
-      return res.status(404).json({ message: "Review not found or unauthorized." });
+      return res
+        .status(404)
+        .json({ message: "Review not found or unauthorized." });
     }
 
     // ✅ Delete the review
