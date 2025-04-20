@@ -472,6 +472,15 @@ router.post(
 // ────────────────────────────────────────────────────────────────────────────────
 router.get("/file/:fileId", async (req, res) => {
   try {
+    if (!gfsBucket) {
+      return res
+        .status(500)
+        .json({
+          message:
+            "Database connection not ready yet. Please try again in a moment.",
+        });
+    }
+
     const fileId = new mongoose.Types.ObjectId(req.params.fileId);
     const downloadStream = gfsBucket.openDownloadStream(fileId);
 

@@ -11,10 +11,10 @@ const router = express.Router();
 router.post("/", authenticate, async (req, res) => {
   try {
     const { course_id, rating, review } = req.body;
-    const student_id = req.user.id;
+    const user_id = req.user.id; // This is the user_id, not the student_id
 
     console.log("🟡 Received Review:", {
-      student_id,
+      user_id,
       course_id,
       rating,
       review,
@@ -26,6 +26,20 @@ router.post("/", authenticate, async (req, res) => {
         .status(400)
         .json({ message: "Invalid rating or missing fields." });
     }
+
+    // ✅ Get the student's record ID from the students table using user_id
+    const [studentRecord] = await db.query(
+      "SELECT id FROM students WHERE user_id = ?",
+      [user_id]
+    );
+
+    if (studentRecord.length === 0) {
+      return res.status(404).json({ message: "Student record not found." });
+    }
+
+    const student_id = studentRecord[0].id; // Get the actual student_id (record ID)
+
+    console.log("✅ Found student record ID:", student_id);
 
     // ✅ Ensure student is enrolled in the course
     const [enrollment] = await db.query(
@@ -63,7 +77,7 @@ router.post("/", authenticate, async (req, res) => {
     // ✅ Get student name to include in notification
     const [student] = await db.query(
       "SELECT first_name, last_name FROM users WHERE id = ?",
-      [student_id]
+      [user_id]
     );
 
     if (student.length > 0) {
@@ -71,7 +85,7 @@ router.post("/", authenticate, async (req, res) => {
       const message = `${studentName} has submitted a ${rating}-star review for your course "${courseTitle}"`;
 
       // Send notification to tutor about the new review
-      await notifyTutor(course_id, student_id, message, "review");
+      await notifyTutor(course_id, user_id, message, "review");
       console.log("🔔 Notification sent to tutor about new review");
     }
 
@@ -103,20 +117,31 @@ router.get("/tutor", authenticate, async (req, res) => {
     const tutorId = tutor[0].id;
     console.log("✅ Found tutor_id:", tutorId);
 
-    // ✅ Fetch reviews (Fix: Get student details from users table)
+    // ✅ Fix: Properly join through students to users with the right relationship
     const [reviews] = await db.query(
-      `SELECT r.rating, r.review, r.created_at, 
-                u.first_name AS student_first_name, u.last_name AS student_last_name, 
-                c.title AS course_title
-         FROM reviews r
-         JOIN students s ON r.student_id = s.id
-         JOIN users u ON s.user_id = u.id  -- Fix: Fetch student names from users table
-         JOIN courses c ON r.course_id = c.id
-         WHERE r.tutor_id = ?`,
+      `SELECT 
+        r.id, r.rating, r.review, r.created_at, r.student_id,
+        u.first_name AS student_first_name, u.last_name AS student_last_name, 
+        c.title AS course_title
+      FROM reviews r
+      JOIN students s ON r.student_id = s.id  -- Join with students table using student_id
+      JOIN users u ON s.user_id = u.id  -- Then join to users table through user_id
+      JOIN courses c ON r.course_id = c.id
+      WHERE r.tutor_id = ?
+      ORDER BY r.created_at DESC`,
       [tutorId]
     );
 
-    console.log("📤 Sending Reviews:", reviews);
+    // Add debug logging to see what's being returned
+    console.log(`🔍 Found ${reviews.length} reviews for tutor ${tutorId}`);
+    if (reviews.length > 0) {
+      console.log("Sample review data:", {
+        student_id: reviews[0].student_id,
+        student_name: `${reviews[0].student_first_name} ${reviews[0].student_last_name}`,
+        rating: reviews[0].rating
+      });
+    }
+
     res.status(200).json(reviews);
   } catch (error) {
     console.error("❌ Error fetching tutor reviews:", error);
@@ -129,7 +154,19 @@ router.get("/tutor", authenticate, async (req, res) => {
  */
 router.get("/student", authenticate, async (req, res) => {
   try {
-    const student_id = req.user.id;
+    const user_id = req.user.id;
+
+    // Get the student record ID from the students table
+    const [studentRecord] = await db.query(
+      "SELECT id FROM students WHERE user_id = ?",
+      [user_id]
+    );
+
+    if (studentRecord.length === 0) {
+      return res.status(404).json({ message: "Student record not found." });
+    }
+
+    const student_id = studentRecord[0].id;
 
     const [reviews] = await db.query(
       `SELECT r.rating, r.review, r.created_at, 
@@ -137,8 +174,8 @@ router.get("/student", authenticate, async (req, res) => {
               c.title AS course_title
        FROM reviews r
        JOIN tutors t ON r.tutor_id = t.id
-       JOIN users u ON t.user_id = u.id  -- Fix: Fetch tutor names from users table
-       JOIN courses c ON r.course_id = c.ida
+       JOIN users u ON t.user_id = u.id
+       JOIN courses c ON r.course_id = c.id
        WHERE r.student_id = ?`,
       [student_id]
     );
@@ -155,13 +192,26 @@ router.get("/student", authenticate, async (req, res) => {
  */
 router.get("/student/courses", authenticate, async (req, res) => {
   try {
-    const student_id = req.user.id;
+    const user_id = req.user.id;
+
+    // Get the student record ID from the students table
+    const [studentRecord] = await db.query(
+      "SELECT id FROM students WHERE user_id = ?",
+      [user_id]
+    );
+
+    if (studentRecord.length === 0) {
+      return res.status(404).json({ message: "Student record not found." });
+    }
+
+    const student_id = studentRecord[0].id;
+
     const [courses] = await db.query(
       `SELECT c.id, c.title, c.tutor_id, u.first_name, u.last_name 
        FROM courses c 
        JOIN enrollments e ON c.id = e.course_id 
        JOIN tutors t ON c.tutor_id = t.id 
-       JOIN users u ON t.user_id = u.id  -- Fix: Fetch tutor names from users table
+       JOIN users u ON t.user_id = u.id  -- Fetch tutor names from users table
        WHERE e.student_id = ?`,
       [student_id]
     );
@@ -179,7 +229,19 @@ router.get("/student/courses", authenticate, async (req, res) => {
 router.delete("/:reviewId", authenticate, async (req, res) => {
   try {
     const { reviewId } = req.params;
-    const student_id = req.user.id;
+    const user_id = req.user.id;
+
+    // Get the student record ID from the students table
+    const [studentRecord] = await db.query(
+      "SELECT id FROM students WHERE user_id = ?",
+      [user_id]
+    );
+
+    if (studentRecord.length === 0) {
+      return res.status(404).json({ message: "Student record not found." });
+    }
+
+    const student_id = studentRecord[0].id;
 
     // ✅ Ensure the review belongs to the student
     const [review] = await db.query(
