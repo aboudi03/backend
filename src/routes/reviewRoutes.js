@@ -138,7 +138,7 @@ router.get("/tutor", authenticate, async (req, res) => {
       console.log("Sample review data:", {
         student_id: reviews[0].student_id,
         student_name: `${reviews[0].student_first_name} ${reviews[0].student_last_name}`,
-        rating: reviews[0].rating
+        rating: reviews[0].rating,
       });
     }
 
