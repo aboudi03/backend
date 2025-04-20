@@ -41,13 +41,19 @@ router.post("/", authenticate, async (req, res) => {
 
     console.log("✅ Found student record ID:", student_id);
 
-    // ✅ Ensure student is enrolled in the course
+    // ✅ Ensure student is enrolled in the course - fixed query to use user_id instead of student_id
     const [enrollment] = await db.query(
       "SELECT * FROM enrollments WHERE student_id = ? AND course_id = ?",
-      [student_id, course_id]
+      [user_id, course_id]
     );
 
     if (enrollment.length === 0) {
+      console.log(
+        "❌ No enrollment found for user_id:",
+        user_id,
+        "course_id:",
+        course_id
+      );
       return res
         .status(403)
         .json({ message: "You cannot review a course you haven't taken." });
