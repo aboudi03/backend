@@ -314,7 +314,7 @@ router.post(
               uploadStream.on("finish", async () => {
                 try {
                   const fileId = uploadStream.id.toString();
-                  // Determine file type (e.g., from mimetype or keep simple 'file')
+                  // Determine file type (e.e., from mimetype or keep simple 'file')
                   const fileType = file.mimetype.startsWith("video")
                     ? "video"
                     : file.mimetype === "application/pdf"
@@ -565,25 +565,30 @@ router.get("/:id", authenticate, async (req, res) => {
 
     let progress = null;
     let passedChapters = [];
+    let isEnrolled = false;
 
     if (req.user && req.user.id) {
       const studentId = req.user.id;
 
+      // Check if the student is enrolled in this course
       const [enrollment] = await db.query(
         "SELECT progress FROM enrollments WHERE student_id = ? AND course_id = ?",
         [studentId, courseId]
       );
-      if (enrollment.length > 0) {
-        progress = enrollment[0].progress;
-      }
 
-      // 🔥 Fetch passed chapters
-      const [passedRows] = await db.query(
-        `SELECT chapter_id FROM quiz_results 
-         WHERE student_id = ? AND score >= 60`,
-        [studentId]
-      );
-      passedChapters = passedRows.map((r) => r.chapter_id);
+      isEnrolled = enrollment.length > 0;
+
+      if (isEnrolled) {
+        progress = enrollment[0].progress;
+
+        // Fetch passed chapters
+        const [passedRows] = await db.query(
+          `SELECT chapter_id FROM quiz_results 
+           WHERE student_id = ? AND score >= 60`,
+          [studentId]
+        );
+        passedChapters = passedRows.map((r) => r.chapter_id);
+      }
     }
 
     res.status(200).json({
@@ -596,14 +601,14 @@ router.get("/:id", authenticate, async (req, res) => {
       sections,
       playlistUrl: null,
       progress,
-      passedChapters, // ✅ now included
+      passedChapters,
+      isEnrolled, // Include enrollment status in the response
     });
   } catch (error) {
     console.error("❌ Error fetching course detail:", error);
     res.status(500).json({ message: "Failed to fetch course details." });
   }
 });
-
 
 // ✅ GET: Fetch all sessions or announcements (for calendar display)
 router.get("/sessions", async (req, res) => {
