@@ -41,6 +41,18 @@ router.post("/", authenticate, async (req, res) => {
 
     console.log("✅ Found student record ID:", student_id);
 
+    // ✅ Check if student has already reviewed this course
+    const [existingReview] = await db.query(
+      "SELECT * FROM reviews WHERE student_id = ? AND course_id = ?",
+      [student_id, course_id]
+    );
+
+    if (existingReview.length > 0) {
+      return res.status(400).json({ 
+        message: "You have already reviewed this course. You cannot submit multiple reviews for the same course." 
+      });
+    }
+
     // ✅ Ensure student is enrolled in the course - fixed query to use user_id instead of student_id
     const [enrollment] = await db.query(
       "SELECT * FROM enrollments WHERE student_id = ? AND course_id = ?",
@@ -49,8 +61,8 @@ router.post("/", authenticate, async (req, res) => {
 
     if (enrollment.length === 0) {
       console.log(
-        "❌ No enrollment found for user_id:",
-        user_id,
+        "❌ No enrollment found for student_id:",
+        student_id,
         "course_id:",
         course_id
       );
@@ -267,6 +279,39 @@ router.delete("/:reviewId", authenticate, async (req, res) => {
     res.status(200).json({ message: "Review deleted successfully!" });
   } catch (error) {
     console.error("❌ Error deleting review:", error);
+    res.status(500).json({ message: "Server error." });
+  }
+});
+
+/**
+ * 🔹 GET: Check if student has reviewed a specific course
+ */
+router.get("/check/:courseId", authenticate, async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const user_id = req.user.id;
+
+    // Get the student record ID
+    const [studentRecord] = await db.query(
+      "SELECT id FROM students WHERE user_id = ?",
+      [user_id]
+    );
+
+    if (studentRecord.length === 0) {
+      return res.status(404).json({ message: "Student record not found." });
+    }
+
+    const student_id = studentRecord[0].id;
+
+    // Check if review exists
+    const [review] = await db.query(
+      "SELECT * FROM reviews WHERE student_id = ? AND course_id = ?",
+      [student_id, courseId]
+    );
+
+    res.status(200).json({ hasReviewed: review.length > 0 });
+  } catch (error) {
+    console.error("❌ Error checking review status:", error);
     res.status(500).json({ message: "Server error." });
   }
 });
