@@ -473,18 +473,42 @@ router.post(
 router.get("/file/:fileId", async (req, res) => {
   try {
     if (!gfsBucket) {
-      return res
-        .status(500)
-        .json({
-          message:
-            "Database connection not ready yet. Please try again in a moment.",
-        });
+      return res.status(500).json({
+        message:
+          "Database connection not ready yet. Please try again in a moment.",
+      });
     }
 
     const fileId = new mongoose.Types.ObjectId(req.params.fileId);
+
+    // First, find the file metadata to get its content type
+    const files = await mongoConnection.db
+      .collection("uploads.files")
+      .find({ _id: fileId })
+      .toArray();
+
+    if (!files || files.length === 0) {
+      return res.status(404).json({ message: "File not found" });
+    }
+
+    // Get the file's content type from its metadata
+    const contentType = files[0].contentType;
+    console.log(`Serving file ${fileId} with content type: ${contentType}`);
+
+    // Set the appropriate content type based on the file
+    res.set("Content-Type", contentType);
+
+    // Open the download stream and pipe it to the response
     const downloadStream = gfsBucket.openDownloadStream(fileId);
 
-    res.set("Content-Type", "application/pdf");
+    // Handle potential errors in the stream
+    downloadStream.on("error", (error) => {
+      console.error("Download stream error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Error streaming file" });
+      }
+    });
+
     downloadStream.pipe(res);
   } catch (error) {
     console.error("❌ File fetch error:", error);
