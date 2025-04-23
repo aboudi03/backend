@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { login, logout } = require("../controllers/authController");
+const { login, logout, verifyEmail } = require("../controllers/authController");
 const jwt = require("jsonwebtoken");
 
 const JWT_SECRET_KEY = "mySuperSecretKey"; // same one used in authController
@@ -10,6 +10,8 @@ router.post("/login", login);
 
 // 🔴 Logout: clears cookie
 router.post("/logout", logout);
+//verify email
+router.get("/verify", verifyEmail); // GET /api/auth/verify
 
 // 🔍 Status: check if user is logged in by verifying the token cookie
 router.get("/status", (req, res) => {

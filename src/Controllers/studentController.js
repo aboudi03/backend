@@ -1,14 +1,13 @@
 const bcrypt = require('bcryptjs');
 const db = require('../db/db');
-
+const { sendVerificationEmail } = require("../utils/email");
+const crypto = require("crypto");
 const registerStudent = async (req, res) => {
-  console.log("Incoming request body:", req.body);
-
   const {
     firstName,
     lastName,
     email,
-    phoneNumber, // Ensure this matches the frontend payload
+    phoneNumber,
     password,
     educationLevel,
     school,
@@ -16,68 +15,50 @@ const registerStudent = async (req, res) => {
     goals,
   } = req.body;
 
-  // 1. Validate all required fields
   if (
-    !firstName ||
-    !lastName ||
-    !email ||
-    !phoneNumber ||
-    !password ||
-    !educationLevel ||
-    !school ||
-    !Array.isArray(subjects) || // Ensure subjects is an array
-    subjects.length === 0 ||
-    !goals
+    !firstName || !lastName || !email || !phoneNumber || !password ||
+    !educationLevel || !school || !Array.isArray(subjects) || subjects.length === 0 || !goals
   ) {
-    console.error("Validation failed: Missing or invalid fields");
     return res.status(400).json({ message: "All required fields must be provided." });
   }
 
   try {
-    // 2. Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 3. Insert user data into `users` table
-    const userSql = `
-      INSERT INTO users (first_name, last_name, email, phone_number, password_hash, user_type)
-      VALUES (?, ?, ?, ?, ?, 'student')
-    `;
-    const [userResult] = await db.query(userSql, [
-      firstName,
-      lastName,
-      email,
-      phoneNumber,
-      hashedPassword,
-    ]);
+    const [userResult] = await db.query(
+      `INSERT INTO users (first_name, last_name, email, phone_number, password_hash, user_type)
+       VALUES (?, ?, ?, ?, ?, 'student')`,
+      [firstName, lastName, email, phoneNumber, hashedPassword]
+    );
 
-    // 4. Retrieve the new user ID
     const userId = userResult.insertId;
-    console.log("User inserted with ID:", userId);
 
-    // 5. Insert student-specific data into `students` table
-    const studentSql = `
-      INSERT INTO students (user_id, education_level, school, subjects, goals)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-    await db.query(studentSql, [
-      userId,
-      educationLevel,
-      school,
-      JSON.stringify(subjects), // Store array as JSON
-      goals,
-    ]);
+    await db.query(
+      `INSERT INTO students (user_id, education_level, school, subjects, goals)
+       VALUES (?, ?, ?, ?, ?)`,
+      [userId, educationLevel, school, JSON.stringify(subjects), goals]
+    );
 
-    console.log("Student inserted successfully");
-    res.status(201).json({ message: "Student registered successfully!" });
+    // 🔐 Generate token and send verification email
+    const token = crypto.randomBytes(32).toString("hex");
+
+    await db.query(
+      "UPDATE users SET verification_token = ?, is_verified = 0 WHERE id = ?",
+      [token, userId]
+    );
+
+    await sendVerificationEmail(email, token);
+
+    res.status(201).json({ message: "Student registered successfully! Please check your email to verify your account." });
   } catch (error) {
-    console.error("Error during registration:", error.sqlMessage || error.message);
-
     if (error.code === "ER_DUP_ENTRY") {
       return res.status(400).json({ message: "Email or phone number already exists." });
     }
 
+    console.error("Error during registration:", error.sqlMessage || error.message);
     res.status(500).json({ message: "An error occurred during registration." });
   }
 };
+
 
 module.exports = { registerStudent };
