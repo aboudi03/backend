@@ -1,330 +1,246 @@
-const express = require("express");
-const db = require("../db/db");
+const express          = require("express");
+const db               = require("../db/db");
 const { authenticate } = require("../middleware/authMiddleware");
-const { ensureTutor } = require("../middleware/authTutor");
+const { ensureTutor }  = require("../middleware/authTutor");
 
-const router = express.Router();
+const router        = express.Router();
+const MAX_ATTEMPTS  = 2;      // 1st try + 1 retry
+const PASS_MARK     = 60;     // %
 
-/**
- * 🔹 GET /:chapterId/questions
- * Fetch all quiz questions for a chapter
- */
+/* ────────────────────────────────────────────────────────────── */
+/* 1. All questions for a chapter                                */
+/* ────────────────────────────────────────────────────────────── */
 router.get("/:chapterId/questions", authenticate, async (req, res) => {
-    const chapterId = req.params.chapterId;
-  
-    try {
-      const [questions] = await db.query(
-        "SELECT id, question_text, options FROM quiz_questions WHERE chapter_id = ?",
-        [chapterId]
-      );
-  
-      const parsed = questions.map((q) => {
-        let parsedOptions = [];
-        try {
-          parsedOptions = typeof q.options === "string" ? JSON.parse(q.options) : q.options;
-          if (!Array.isArray(parsedOptions)) throw new Error("Options is not an array");
-        } catch (err) {
-          console.warn(`⚠️ Failed to parse options for question ${q.id}:`, err);
-          parsedOptions = [];
-        }
-  
-        return {
-          id: q.id,
-          question_text: q.question_text,
-          options: parsedOptions,
-        };
-      });
-  
-      res.json(parsed);
-    } catch (err) {
-      console.error("❌ Error fetching quiz questions:", err);
-      res.status(500).json({ message: "Failed to load questions" });
-    }
-  });
-
-/**
- * 🔹 POST /:chapterId/submit
- * Student submits a quiz for a chapter (max 2 attempts)
- */
-router.post("/:chapterId/submit", authenticate, async (req, res) => {
-    const studentId = req.user.id;
-    const chapterId = req.params.chapterId;
-    const { answers } = req.body;
-  
-    try {
-      const [quizRow] = await db.query(
-        "SELECT id FROM quizzes WHERE chapter_number = ?",
-        [chapterId]
-      );
-  
-      if (quizRow.length === 0) {
-        return res.status(404).json({ message: "Quiz not found for this chapter." });
-      }
-  
-      const quizId = quizRow[0].id;
-  
-      const [previousAttempts] = await db.query(
-        "SELECT * FROM quiz_submissions WHERE student_id = ? AND quiz_id = ?",
-        [studentId, quizId]
-      );
-  
-      const attemptCount = previousAttempts.length;
-      if (attemptCount >= 10) {
-        return res.status(403).json({ message: "You have reached the maximum number of attempts." });
-      }
-  
-      const [correctAnswers] = await db.query(
-        "SELECT id, correct_option FROM quiz_questions WHERE chapter_id = ?",
-        [chapterId]
-      );
-  
-      let correctCount = 0;
-      const evaluation = correctAnswers.map((q) => {
-        const studentAnswer = answers.find((a) => a.questionId === q.id);
-        const isCorrect = studentAnswer?.selectedOption === q.correct_option;
-        if (isCorrect) correctCount++;
-        return {
-          questionId: q.id,
-          correct: isCorrect,
-          correctOption: q.correct_option,
-          selected: studentAnswer?.selectedOption || null,
-        };
-      });
-  
-      const total = correctAnswers.length;
-      const score = total > 0 ? (correctCount / total) * 100 : 0;
-      const passed = score >= 60;
-  
-      await db.query(
-        `INSERT INTO quiz_submissions (student_id, quiz_id, score, passed)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE score = VALUES(score), passed = VALUES(passed), submitted_at = CURRENT_TIMESTAMP`,
-        [studentId, quizId, score, passed ? 1 : 0]
-      );
-  
-      await db.query(
-        `REPLACE INTO quiz_results (student_id, chapter_id, score)
-         VALUES (?, ?, ?)`,
-        [studentId, chapterId, score]
-      );
-  
-      // ✅ Progress update logic
-      // ✅ Get the course ID for this chapter
-const [courseRow] = await db.query(
-    "SELECT course_id FROM course_sections WHERE id = ?",
-    [chapterId]
-  );
-  const courseId = courseRow[0]?.course_id;
-  
-  if (courseId) {
-    const [[{ total }]] = await db.query(
-      "SELECT COUNT(*) AS total FROM course_sections WHERE course_id = ?",
-      [courseId]
-    );
-  
-    const [[{ passed }]] = await db.query(
-      `SELECT COUNT(DISTINCT chapter_id) AS passed
-       FROM quiz_results
-       WHERE student_id = ? AND chapter_id IN (
-         SELECT id FROM course_sections WHERE course_id = ?
-       ) AND score >= 60`,
-      [studentId, courseId]
-    );
-  
-    const progress = total > 0 ? Math.min(Math.round((passed / total) * 100), 99) : 0;
-  
-    await db.query(
-      `UPDATE enrollments SET progress = ? WHERE student_id = ? AND course_id = ?`,
-      [progress, studentId, courseId]
-    );
-  }
-  
-  
-      res.json({
-        message: "Quiz submitted",
-        score,
-        passed,
-        correctAnswers: Object.fromEntries(correctAnswers.map(q => [q.id, q.correct_option])),
-        attempt: attemptCount + 1,
-        retryAvailable: attemptCount + 1 < 10
-      });
-    } catch (err) {
-      console.error("❌ Error submitting quiz:", err);
-      res.status(500).json({ message: "Error evaluating quiz" });
-    }
-  });
-  router.get("/:chapterId/attempt", authenticate, async (req, res) => {
-    const studentId = req.user.id;
-    const chapterId = req.params.chapterId;
-  
-    try {
-      const [quizRow] = await db.query(
-        "SELECT id FROM quizzes WHERE chapter_number = ?",
-        [chapterId]
-      );
-      if (!quizRow.length) return res.status(404).json({ message: "Quiz not found." });
-  
-      const quizId = quizRow[0].id;
-  
-      const [attempts] = await db.query(
-        "SELECT score, passed, submitted_at FROM quiz_submissions WHERE student_id = ? AND quiz_id = ?",
-        [studentId, quizId]
-      );
-  
-      if (!attempts.length) {
-        return res.json({ attempted: false });
-      }
-  
-      res.json({
-        attempted: true,
-        score: attempts[0].score,
-        passed: attempts[0].passed,
-        submittedAt: attempts[0].submitted_at,
-      });
-    } catch (err) {
-      console.error("❌ Error checking attempt:", err);
-      res.status(500).json({ message: "Failed to fetch attempt." });
-    }
-  });
-router.get("/:chapterId/status", authenticate, async (req, res) => {
-  const studentId = req.user.id;
-  const chapterId = req.params.chapterId;
+  const chapterId = Number(req.params.chapterId);
 
   try {
-    const [quizRow] = await db.query(
-      "SELECT id FROM quizzes WHERE chapter_number = ?",
+    const [rows] = await db.query(
+      "SELECT id, question_text, options FROM quiz_questions WHERE chapter_id = ?",
       [chapterId]
     );
 
-    if (!quizRow.length) {
-      return res.json({ submitted: false });
-    }
+    const questions = rows.map((q) => {
+      let opts = q.options;
+      if (typeof opts === "string") {
+        try { opts = JSON.parse(opts); } catch { opts = []; }
+      }
+      if (!Array.isArray(opts)) opts = [];
 
-    const quizId = quizRow[0].id;
-
-    const [attempts] = await db.query(
-      `SELECT score, passed FROM quiz_submissions 
-       WHERE student_id = ? AND quiz_id = ?
-       ORDER BY submitted_at DESC
-       LIMIT 1`,
-      [studentId, quizId]
-    );
-
-    if (!attempts.length) return res.json({ submitted: false });
-
-    const passed = attempts[0].passed === 1;
-    const score = Number(attempts[0].score);
-
-    return res.json({
-      submitted: true,
-      score,
-      passed,
-      attempt: attempts.length,
-      retryAvailable: !passed && attempts.length < 10
+      return { id: q.id, question_text: q.question_text, options: opts };
     });
+
+    res.json(questions);
   } catch (err) {
-    console.error("❌ Quiz status error:", err);
-    res.status(500).json({ message: "Server error checking quiz access" });
+    console.error("❌ /questions:", err);
+    res.status(500).json({ message: "Failed to load questions" });
   }
 });
 
+/* ────────────────────────────────────────────────────────────── */
+/* 2. Submit answers                                             */
+/* ────────────────────────────────────────────────────────────── */
+router.post("/:chapterId/submit", authenticate, async (req, res) => {
+  const studentId  = req.user.id;
+  const chapterId  = Number(req.params.chapterId);
+  const { answers } = req.body; /* [{questionId, selectedOption}] */
 
+  try {
+    /* quiz id */
+    const [[quiz]] = await db.query(
+      "SELECT id FROM quizzes WHERE chapter_number = ?",
+      [chapterId]
+    );
+    if (!quiz) return res.status(404).json({ message: "Quiz not found." });
+    const quizId = quiz.id;
 
-/**
- * 🔹 GET /accessible/:courseId
- * Get accessible chapters based on quiz_results
- */
+    /* attempt count */
+    const [[{ cnt }]] = await db.query(
+      "SELECT COUNT(*) AS cnt FROM quiz_submissions WHERE student_id = ? AND quiz_id = ?",
+      [studentId, quizId]
+    );
+    if (cnt >= MAX_ATTEMPTS)
+      return res.status(403).json({ message: "You have reached the maximum number of attempts." });
+
+    /* mark answers */
+    const [corr] = await db.query(
+      "SELECT id, correct_option FROM quiz_questions WHERE chapter_id = ?",
+      [chapterId]
+    );
+
+    let correctTotal = 0;
+    const evaluation = corr.map((q) => {
+      const stud = answers.find((a) => a.questionId === q.id);
+      const ok   = stud?.selectedOption === q.correct_option;
+      if (ok) correctTotal++;
+      return { questionId: q.id, selected: stud?.selectedOption ?? null, correctOption: q.correct_option, correct: ok };
+    });
+
+    const score  = corr.length ? (correctTotal / corr.length) * 100 : 0;
+    const passed = score >= PASS_MARK;
+
+    await db.query(
+      `INSERT INTO quiz_submissions (student_id, quiz_id, score, passed)
+           VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE score = VALUES(score),
+                                passed = VALUES(passed),
+                                submitted_at = CURRENT_TIMESTAMP`,
+      [studentId, quizId, score, passed ? 1 : 0]
+    );
+
+    const correctMap = Object.fromEntries(corr.map((q) => [q.id, q.correct_option]));
+
+    res.json({
+      message:        "Quiz submitted",
+      score,
+      passed,
+      evaluation,
+      correctAnswers: correctMap,
+      attempt:        cnt + 1,
+      retryAvailable: cnt + 1 < MAX_ATTEMPTS,
+    });
+  } catch (err) {
+    console.error("❌ /submit:", err);
+    res.status(500).json({ message: "Error evaluating quiz" });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────── */
+/* 3. Latest attempt status                                      */
+/* ────────────────────────────────────────────────────────────── */
+router.get("/:chapterId/status", authenticate, async (req, res) => {
+  const studentId = req.user.id;
+  const chapterId = Number(req.params.chapterId);
+
+  try {
+    const [[quiz]] = await db.query(
+      "SELECT id FROM quizzes WHERE chapter_number = ?",
+      [chapterId]
+    );
+    if (!quiz) return res.json({ submitted: false });
+    const quizId = quiz.id;
+
+    const [[latest]] = await db.query(
+      `SELECT score, passed
+         FROM quiz_submissions
+        WHERE student_id = ? AND quiz_id = ?
+     ORDER BY submitted_at DESC LIMIT 1`,
+      [studentId, quizId]
+    );
+    if (!latest) return res.json({ submitted: false });
+
+    const [[{ cnt }]] = await db.query(
+      "SELECT COUNT(*) AS cnt FROM quiz_submissions WHERE student_id = ? AND quiz_id = ?",
+      [studentId, quizId]
+    );
+
+    const [rows] = await db.query(
+      "SELECT id, correct_option FROM quiz_questions WHERE chapter_id = ?",
+      [chapterId]
+    );
+    const correctMap = Object.fromEntries(rows.map((r) => [r.id, r.correct_option]));
+
+    res.json({
+      submitted: true,
+      score:     Number(latest.score),
+      passed:    latest.passed === 1,
+      attempt:   cnt,
+      retryAvailable: latest.passed === 0 && cnt < MAX_ATTEMPTS,
+      correctAnswers: correctMap,
+    });
+  } catch (err) {
+    console.error("❌ /status:", err);
+    res.status(500).json({ message: "Server error checking quiz status" });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────── */
+/* 4. Chapters the student can open (FIXED unlock logic)         */
+/* ────────────────────────────────────────────────────────────── */
 router.get("/accessible/:courseId", authenticate, async (req, res) => {
   const studentId = req.user.id;
-  const courseId = Number(req.params.courseId);
+  const courseId  = Number(req.params.courseId);
 
   try {
     const [chapters] = await db.query(
       "SELECT id FROM course_sections WHERE course_id = ? ORDER BY order_index ASC",
       [courseId]
     );
-
     if (!chapters.length) return res.json({ chapterIds: [] });
 
     const [results] = await db.query(
       "SELECT chapter_id, score FROM quiz_results WHERE student_id = ?",
       [studentId]
     );
-
-    const scoreMap = Object.fromEntries(results.map(r => [r.chapter_id, r.score]));
+    const scoreMap = Object.fromEntries(results.map((r) => [r.chapter_id, Number(r.score)]));
 
     const accessible = [];
     for (let i = 0; i < chapters.length; i++) {
-      const chapterId = Number(chapters[i].id);
-      if (i === 0 || i === 1 || scoreMap[chapters[i - 1].id] >= 60) {
-        accessible.push(chapterId);
-      } else {
-        break;
+      const chapId        = Number(chapters[i].id);
+      const prevChapterId = i > 0 ? Number(chapters[i - 1].id) : null;
+
+      /* first two chapters always open */
+      if (i < 2) {
+        accessible.push(chapId);
+        continue;
       }
+
+      const prevScore = Number(scoreMap[prevChapterId] ?? 0);
+      if (prevScore >= PASS_MARK) accessible.push(chapId);
+      /* no break – we keep checking the rest */
     }
 
     res.json({ chapterIds: accessible });
   } catch (err) {
-    console.error("❌ Error getting accessible chapters:", err);
+    console.error("❌ /accessible:", err);
     res.status(500).json({ message: "Failed to get accessible chapters" });
   }
 });
 
-/**
- * 🔹 POST /tutor/add-question
- * Tutor adds a quiz question (auto-creates quiz if needed)
- */
+/* ────────────────────────────────────────────────────────────── */
+/* 5. Tutor adds a question (unchanged from your code)           */
+/* ────────────────────────────────────────────────────────────── */
 router.post("/tutor/add-question", authenticate, ensureTutor, async (req, res) => {
   const { course_id, chapter_id, question_text, options, correct_option } = req.body;
   const tutorUserId = req.user.id;
 
-  if (!course_id || !chapter_id || !question_text || !options || !correct_option) {
+  if (!course_id || !chapter_id || !question_text || !options || !correct_option)
     return res.status(400).json({ message: "All fields required." });
-  }
 
-  // ✅ Validate options
-  if (!Array.isArray(options) || options.some(opt => typeof opt !== "string")) {
+  if (!Array.isArray(options) || options.some((o) => typeof o !== "string"))
     return res.status(400).json({ message: "Options must be an array of strings." });
-  }
 
   try {
-    // Make sure tutor owns this course
-    const [ownership] = await db.query(
-      "SELECT c.id FROM courses c JOIN tutors t ON c.tutor_id = t.id WHERE c.id = ? AND t.user_id = ?",
+    const [[own]] = await db.query(
+      `SELECT c.id
+         FROM courses c
+         JOIN tutors t ON c.tutor_id = t.id
+        WHERE c.id = ? AND t.user_id = ?`,
       [course_id, tutorUserId]
     );
+    if (!own) return res.status(403).json({ message: "Unauthorized." });
 
-    if (!ownership.length) {
-      return res.status(403).json({ message: "Unauthorized." });
-    }
-
-    // Check if quiz already exists
-    const [quizRows] = await db.query(
+    /* ensure quiz exists */
+    const [[quiz]] = await db.query(
       "SELECT id FROM quizzes WHERE course_id = ? AND chapter_number = ?",
       [course_id, chapter_id]
     );
+    const quizId = quiz
+      ? quiz.id
+      : (await db.query(
+          "INSERT INTO quizzes (course_id, chapter_number, title) VALUES (?, ?, ?)",
+          [course_id, chapter_id, `Quiz for Chapter ${chapter_id}`]
+        ))[0].insertId;
 
-    let quizId;
-    if (quizRows.length === 0) {
-      const [inserted] = await db.query(
-        "INSERT INTO quizzes (course_id, chapter_number, title) VALUES (?, ?, ?)",
-        [course_id, chapter_id, `Quiz for Chapter ${chapter_id}`]
-      );
-      quizId = inserted.insertId;
-    } else {
-      quizId = quizRows[0].id;
-    }
-
-    // Insert quiz question
     await db.query(
-      `INSERT INTO quiz_questions (quiz_id, chapter_id, question_text, options, correct_option)
+      `INSERT INTO quiz_questions
+         (quiz_id, chapter_id, question_text, options, correct_option)
        VALUES (?, ?, ?, ?, ?)`,
       [quizId, chapter_id, question_text, JSON.stringify(options), correct_option]
     );
 
     res.status(201).json({ message: "Question added successfully." });
   } catch (err) {
-    console.error("❌ Add Question Error:", err);
+    console.error("❌ add-question:", err);
     res.status(500).json({ message: "Server error while adding question." });
   }
 });

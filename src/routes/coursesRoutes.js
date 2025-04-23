@@ -111,21 +111,8 @@ router.get("/public", async (req, res) => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────────────────
-// ✅ 2) GET: Fetch all sessions/announcements (ARRAY of sessions)
-// ────────────────────────────────────────────────────────────────────────────────
-router.get("/sessions", async (req, res) => {
-  try {
-    // Query your `course_sessions` table
-    const [sessions] = await db.query("SELECT * FROM course_sessions");
 
-    // Return sessions as an array (no wrapping object)
-    res.status(200).json(sessions);
-  } catch (error) {
-    console.error("❌ Error fetching sessions:", error);
-    res.status(500).json({ message: "Failed to fetch sessions." });
-  }
-});
+
 
 // ────────────────────────────────────────────────────────────────────────────────
 // ✅ 3) POST: Upload a single PDF/video to MongoDB (for tutors)
@@ -410,7 +397,7 @@ router.post(
   async (req, res) => {
     try {
       const { courseId } = req.params;
-      const { title, description, type, scheduled_at, visibility } = req.body;
+      const { title, description, type, scheduled_at } = req.body;
       const duration = 60; // default if not provided
       const userId = req.user.id;
 
@@ -434,8 +421,8 @@ router.post(
 
       // Insert session/announcement
       await db.query(
-        `INSERT INTO course_sessions (course_id, tutor_id, title, description, type, scheduled_at, duration_minutes, visibility)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO course_sessions (course_id, tutor_id, title, description, type, scheduled_at, duration_minutes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           courseId,
           courseCheck[0].tutor_id,
@@ -444,7 +431,6 @@ router.post(
           type,
           scheduled_at,
           duration,
-          visibility || "private",
         ]
       );
       // 🔔 Notify enrolled students
@@ -513,6 +499,33 @@ router.get("/file/:fileId", async (req, res) => {
   } catch (error) {
     console.error("❌ File fetch error:", error);
     res.status(500).json({ message: "Error fetching file." });
+  }
+});
+
+// ✅ GET: Fetch all sessions or announcements (for calendar display)
+router.get("/sessions", async (req, res) => {
+  try {
+    const [sessions] = await db.query(`
+      SELECT 
+        cs.id,
+        cs.course_id,
+        cs.tutor_id,
+        cs.title,
+        cs.description,
+        cs.type,
+        cs.scheduled_at,
+        cs.duration_minutes,
+        c.title AS course_title
+      FROM course_sessions cs
+      LEFT JOIN courses c ON cs.course_id = c.id
+      ORDER BY cs.scheduled_at ASC
+    `);
+    console.log("✅ Sessions to send:", Array.isArray(sessions), sessions);
+
+    res.status(200).json(sessions);
+  } catch (error) {
+    console.error("❌ Error fetching sessions:", error);
+    res.status(500).json({ message: "Failed to fetch sessions." });
   }
 });
 
@@ -647,36 +660,29 @@ router.get("/:id", authenticate, async (req, res) => {
 router.get("/sessions", async (req, res) => {
   try {
     const [sessions] = await db.query(`
-     SELECT 
-  cs.id,
-  cs.course_id,
-  cs.tutor_id,
-  cs.title,
-  cs.description,
-  cs.type,
-  cs.scheduled_at,
-  cs.duration_minutes,
-  c.title AS course_title
-FROM course_sessions cs
-JOIN courses c ON cs.course_id = c.id
-ORDER BY cs.scheduled_at ASC
-
+      SELECT 
+        cs.id,
+        cs.course_id,
+        cs.tutor_id,
+        cs.title,
+        cs.description,
+        cs.type,
+        cs.scheduled_at,
+        cs.duration_minutes,
+        c.title AS course_title
+      FROM course_sessions cs
+      LEFT JOIN courses c ON cs.course_id = c.id
+      ORDER BY cs.scheduled_at ASC
     `);
+    console.log("✅ Sessions to send:", Array.isArray(sessions), sessions);
 
-    if (!Array.isArray(sessions)) {
-      console.error("❌ Expected an array, got:", sessions);
-      return res.status(500).json({ message: "Unexpected response format." });
-    }
-
-    console.log("✅ Sessions fetched:", sessions.length, "entries");
     res.status(200).json(sessions);
   } catch (error) {
     console.error("❌ Error fetching sessions:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch sessions from the database." });
+    res.status(500).json({ message: "Failed to fetch sessions." });
   }
 });
+
 
 // 📌 GET: Sessions/Announcements for Enrolled Courses (Student Only)
 router.get("/student/schedule", authenticate, async (req, res) => {
@@ -685,9 +691,19 @@ router.get("/student/schedule", authenticate, async (req, res) => {
 
     const [sessions] = await db.query(
       `
-      SELECT cs.id, cs.course_id, cs.tutor_id, cs.title, cs.description, cs.type, cs.scheduled_at, cs.duration_minutes
+        SELECT 
+        cs.id,
+        cs.course_id,
+        cs.tutor_id,
+        cs.title,
+        cs.description,
+        cs.type,
+        cs.scheduled_at,
+        cs.duration_minutes,
+        c.title AS course_title
       FROM course_sessions cs
       JOIN enrollments e ON cs.course_id = e.course_id
+      LEFT JOIN courses c ON cs.course_id = c.id
       WHERE e.student_id = ?
       ORDER BY cs.scheduled_at ASC
     `,
@@ -729,24 +745,24 @@ router.delete("/:id", authenticate, ensureTutor, async (req, res) => {
   }
 });
 
-// ✅ GET: Fetch all public announcements
-router.get("/announcements/public", async (req, res) => {
-  try {
-    const [announcements] = await db.query(`
-       SELECT cs.title, cs.description, cs.type, cs.scheduled_at, u.first_name, u.last_name
-      FROM course_sessions cs
-      JOIN tutors t ON cs.tutor_id = t.id
-      JOIN users u ON t.user_id = u.id
-      WHERE cs.visibility = 'public'
-      ORDER BY cs.scheduled_at DESC
-      LIMIT 6
-    `);
-    res.status(200).json(announcements);
-  } catch (err) {
-    console.error("❌ Error fetching public announcements:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+// // ✅ GET: Fetch all public announcements
+// router.get("/announcements/public", async (req, res) => {
+//   try {
+//     const [announcements] = await db.query(`
+//        SELECT cs.title, cs.description, cs.type, cs.scheduled_at, u.first_name, u.last_name
+//       FROM course_sessions cs
+//       JOIN tutors t ON cs.tutor_id = t.id
+//       JOIN users u ON t.user_id = u.id
+//       WHERE cs.visibility = 'public'
+//       ORDER BY cs.scheduled_at DESC
+//       LIMIT 6
+//     `);
+//     res.status(200).json(announcements);
+//   } catch (err) {
+//     console.error("❌ Error fetching public announcements:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
 
 // ✅ PUT: Update a course by tutor
 router.put(
